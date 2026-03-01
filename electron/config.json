@@ -1,0 +1,8 @@
+{
+  "API_BASE_URL": "http://localhost:44306/api",
+  "SUBSCRIBER_ID": 1,
+  "ADMIN_PAGE_URL": "http://localhost:40/login",
+  "KOT_REDIRECT_URL": "/tables",
+  "KOT_REDIRECT_URL_ALTERNATIVE": "/billing"
+}
+
