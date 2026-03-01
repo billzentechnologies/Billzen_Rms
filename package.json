@@ -1,0 +1,91 @@
+{
+  "name": "resturant",
+  "version": "0.1.1",
+  "private": true,
+  "description": "Restaurant POS Application",
+  "author": "User",
+  "homepage": "./",
+  "dependencies": {
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^13.5.0",
+    "axios": "^1.10.0",
+    "date-fns": "^4.1.0",
+    "js-cookie": "^3.0.5",
+    "lodash.debounce": "^4.0.8",
+    "lucide-react": "^0.518.0",
+    "react": "^19.1.0",
+    "react-datepicker": "^8.4.0",
+    "react-dom": "^19.1.0",
+    "react-icons": "^5.5.0",
+    "react-router-dom": "^7.6.2",
+    "react-scripts": "5.0.1",
+    "react-toastify": "^11.0.5",
+    "recharts": "^3.0.0",
+    "web-vitals": "^2.1.4"
+  },
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "npm run sync-config && react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "electron:start": "cross-env NODE_ENV=development electron .",
+    "electron:dev": "npm run sync-config && concurrently \"npm start\" \"wait-on http://localhost:3000 && npm run electron:start\"",
+    "electron:build": "npm run sync-config && npm run build && electron-builder",
+    "electron:pack": "npm run sync-config && npm run build && electron-packager . FoodPOS --platform=win32 --arch=x64 --out=dist --overwrite --icon=public/billzenrms.png --extra-resource=electron/config.json",
+    "sync-config": "node -e \"const fs = require('fs'); if (fs.existsSync('electron/config.json')) { fs.copyFileSync('electron/config.json', 'public/config.json'); console.log('✅ Config synced to public/'); }\""
+  },
+  "build": {
+    "appId": "com.resturant.pos",
+    "directories": {
+      "output": "dist"
+    },
+    "extends": null,
+    "files": [
+      "build/**/*",
+      "electron/**/*",
+      "public/billzenrms.png",
+      "!electron/config.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "public/billzenrms.png"
+    },
+    "extraResources": [
+      {
+        "from": "electron/config.json",
+        "to": "config.json"
+      }
+    ]
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.11",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^40.2.1",
+    "electron-builder": "^26.7.0",
+    "electron-packager": "^17.1.2",
+    "tailwindcss": "^3.4.17",
+    "wait-on": "^9.0.3"
+  }
+}
