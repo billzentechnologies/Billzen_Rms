@@ -10,7 +10,7 @@ import axios from "axios"; // Test comment
 
 let API_BASE = "http://localhost:44306/api";
 
-
+     
 let SUBSCRIBER_ID = "1";
 let ADMIN_PAGE_URL = "http://localhost:40/login";
 let KOT_REDIRECT_URL = "/tables";
