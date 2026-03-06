@@ -465,7 +465,7 @@ const Cart = ({
             discAmt: billLevelDiscAmt,
             orderItemsDetails: orderItemsDetails
           },
-          orderstatus: 0
+          orderstatus: 1
         }
       };
 
@@ -703,7 +703,7 @@ const Cart = ({
           discAmt: billLevelDiscAmt,
           orderItemsDetails: orderItemsDetails
         },
-        orderstatus: 0
+        orderstatus: 1
       }
     };
 

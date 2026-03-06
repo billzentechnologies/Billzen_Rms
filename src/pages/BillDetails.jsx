@@ -15,6 +15,7 @@ const BillDetails = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [error, setError] = useState(null);
   const [printing, setPrinting] = useState(null);
+  const [viewLoading, setViewLoading] = useState(null); // Track which bill is loading its details
 
   const [startDate, setStartDate] = useState(() => {
     const today = new Date();
@@ -82,14 +83,23 @@ const BillDetails = () => {
       return;
     }
 
+    console.log('Fetching details for bill:', sellId);
+    setViewLoading(sellId);
     try {
       const response = await getBillDetails(sellId);
+      console.log('Bill details response:', response);
+      if (!response || (typeof response === 'object' && Object.keys(response).length === 0)) {
+        throw new Error('Received empty response from server');
+      }
       setBillDetails(response.data || response);
       setSelectedBill(sellId);
       setShowDetailsModal(true);
     } catch (error) {
       console.error('Error fetching bill details:', error);
-      alert('Failed to load bill details');
+      const errorMessage = error?.response?.data?.Message || error?.Message || error?.message || 'Failed to load bill details';
+      alert(`Failed to load bill details: ${errorMessage}`);
+    } finally {
+      setViewLoading(null);
     }
   };
 
@@ -313,9 +323,14 @@ const BillDetails = () => {
                         <div className="flex items-center justify-center gap-2">
                           <button
                             onClick={() => handleViewDetails(bill.sell_id)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-xs font-semibold"
+                            disabled={viewLoading === bill.sell_id}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-xs font-semibold disabled:opacity-50"
                           >
-                            <Eye className="w-3.5 h-3.5" />
+                            {viewLoading === bill.sell_id ? (
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Eye className="w-3.5 h-3.5" />
+                            )}
                             View
                           </button>
                           <button
@@ -378,9 +393,14 @@ const BillDetails = () => {
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleViewDetails(bill.sell_id)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-xs font-semibold"
+                      disabled={viewLoading === bill.sell_id}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-xs font-semibold disabled:opacity-50"
                     >
-                      <Eye className="w-3.5 h-3.5" />
+                      {viewLoading === bill.sell_id ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Eye className="w-3.5 h-3.5" />
+                      )}
                       View
                     </button>
                     <button

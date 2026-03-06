@@ -89,8 +89,8 @@ const LoginPage = () => {
       const data = await loginUser({
         username: formData.username,
         password: formData.password,
-        // device_id: deviceInfo.deviceId
-          device_id: '52FBA27D-2E71-4C42-A04D-8FDF3BE24108' // Sending device id
+        device_id: deviceInfo.deviceId
+          // device_id: '52FBA27D-2E71-4C42-A04D-8FDF3BE24108' // Sending device id
       });
 
       console.log("API Response:", data);

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, Phone, Menu } from 'lucide-react';
+import logo from '../assets/Billzen main1.png';
 import { FaCreditCard, FaMoneyBillWave, FaMobile, FaPercentage, FaEllipsisH } from 'react-icons/fa';
 import { saveBill, printCheck, getOrderDetails, cancelOrder, getTaxes, saveOrder, saveItemVoid, getKotRedirectUrl } from '../services/apicall';
 import { useNavigate } from 'react-router-dom';
@@ -8,6 +9,8 @@ import DiscountModal from './Discountmodal';
 import OrderCancelModal from './Ordercancelmodal';
 import MultiPayModal from './Multipaymodal';
 import CategoryDiscountModal from './CategoryDiscountModal';
+import SettingsSidebar from './SettingsSidebar';
+import DayClosePopup from './DayClosePopup';
 import { PERMISSIONS } from './permissions';
 import { usePermission } from '../context/PermissionContext';
 
@@ -45,6 +48,8 @@ const PaymentModal = ({
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showMultiPayModal, setShowMultiPayModal] = useState(false);
   const [showCategoryDiscountModal, setShowCategoryDiscountModal] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showDayClosePopup, setShowDayClosePopup] = useState(false);
 
   // Discount state
   const [selectedDiscount, setSelectedDiscount] = useState(null);
@@ -55,6 +60,14 @@ const PaymentModal = ({
 
   // Category-wise discount state
   const [categoryDiscounts, setCategoryDiscounts] = useState({});
+
+  // Redesign UI states
+  const [viewMode, setViewMode] = useState('denominations'); // 'denominations' or 'discounts'
+  const [enteredAmount, setEnteredAmount] = useState('');
+  const [sidebarTab, setSidebarTab] = useState('itemWise'); // 'itemWise', 'category', 'billWise'
+  const [selectedSidebarCategory, setSelectedSidebarCategory] = useState(null);
+  const [allDiscounts, setAllDiscounts] = useState([]);
+  const [discountsLoading, setDiscountsLoading] = useState(false);
 
   // Transaction type state
   const [orderTransactionType, setOrderTransactionType] = useState(null);
@@ -155,6 +168,9 @@ const PaymentModal = ({
     };
 
     fetchTaxes();
+
+    // NOTE: Discounts are loaded lazily when user clicks the DISCOUNT button,
+    // not on every modal mount. See handleDiscountToggle below.
   }, []);
 
   useEffect(() => {
@@ -578,7 +594,7 @@ const PaymentModal = ({
 
   const totals = calculateBillTotals();
 
-  const ensureOrderExists = async () => {
+  const ensureOrderExists = async (forceSave = false) => {
     const actualOrderId = existingOrderId || 0;
 
     // 1. Identify new items or voids
@@ -589,7 +605,9 @@ const PaymentModal = ({
       return !alreadySent;
     });
 
-    const shouldSave = newItems.length > 0 || voidedItems.length > 0 || actualOrderId === 0 || selectedDiscount !== null || Object.values(categoryDiscounts).some(v => v > 0);
+    // Only save if there are actual changes: new items, voids, new order, or category discounts.
+    // Do NOT trigger save just because a discount is selected — discounts are saved at payment/check-print time.
+    const shouldSave = forceSave || newItems.length > 0 || voidedItems.length > 0 || actualOrderId === 0 || Object.values(categoryDiscounts).some(v => v > 0);
 
     if (!shouldSave) {
       console.log('✅ Order is already up to date:', actualOrderId);
@@ -642,15 +660,9 @@ const PaymentModal = ({
         });
       }
 
-      // If category discounts are applied, we need to ensure ALL items in those categories are sent
-      // to the backend to save the discount, even if they were already sent.
-      const discountedItemKeys = new Set();
-
       // Add new items (always need saving)
       newItems.forEach((item) => {
         const itemId = getPureItemId(item);
-        const itemKey = `${item.id || item.itemId}_${item.variantId || 0}_${item.description || ''}`.toLowerCase();
-        discountedItemKeys.add(itemKey);
 
         const catIdForLookup = item.categoryId || item.subcategoryId || 0;
         const categoryDisc = categoryDiscounts[catIdForLookup] || 0;
@@ -691,37 +703,10 @@ const PaymentModal = ({
         }
       });
 
-      // Add already sent items if they have a category discount
-      selectedItems.forEach((item) => {
-        if (item.isVoided) return;
-        const itemKey = `${item.id || item.itemId}_${item.variantId || 0}_${item.description || ''}`.toLowerCase();
-
-        // Skip if already added as a new item
-        if (discountedItemKeys.has(itemKey)) return;
-
-        const catIdForLookup = item.categoryId || item.subcategoryId || 0;
-        const categoryDisc = categoryDiscounts[catIdForLookup] || 0;
-
-        // If a category discount is active for this item, include it in the save request with 0 disc
-        if (categoryDisc > 0) {
-          const itemId = getPureItemId(item);
-          orderItemsDetails.push({
-            itemId: itemId,
-            itemPrice: item.price,
-            itemQty: item.quantity,
-            itemDisc: 0,
-            discType: "Category",
-            itemname: item.name,
-            ModifierItem: item.modifierItem || 0,
-            addDetails: item.description && item.description.trim() ? item.description.trim() : "",
-            variantId: item.variantId || 0,
-            variantName: item.variantName || "",
-            openItemid: 0,
-            is_complimentary: item.isComplimentary || false,
-            subcategoryId: item.subcategoryId || 0
-          });
-        }
-      });
+      // NOTE: Do NOT re-send already-saved items here even if they have a category discount.
+      // The categoryDiscounts field at the order level (sent below) is enough for the backend
+      // to apply the discount. Re-sending items with their quantity causes the backend to
+      // add to the existing quantity, resulting in doubled quantities.
 
       // Bill-level discount amount for SaveOrder (must subtract all line-level discounts first)
       const subTotalForDisc = selectedItems.filter(i => !i.isVoided).reduce((s, i) => s + (i.price * i.quantity), 0);
@@ -764,7 +749,7 @@ const PaymentModal = ({
               })),
             orderItemsDetails: orderItemsDetails
           },
-          orderstatus: 0
+          orderstatus: 1
         }
       };
 
@@ -798,6 +783,29 @@ const PaymentModal = ({
       console.error("❌ Sync failed in PaymentModal:", error);
       throw error;
     }
+  };
+
+  const handleNumpadClick = (value) => {
+    if (value === '.') {
+      if (!enteredAmount.includes('.')) {
+        setEnteredAmount(prev => prev + '.');
+      }
+    } else {
+      setEnteredAmount(prev => prev + value);
+    }
+  };
+
+  const handleBackspace = () => {
+    setEnteredAmount(prev => prev.slice(0, -1));
+  };
+
+  const handleDenominationClick = (amount) => {
+    const current = parseFloat(enteredAmount) || 0;
+    setEnteredAmount((current + amount).toString());
+  };
+
+  const clearAmount = () => {
+    setEnteredAmount('');
   };
 
   const handleMultiPayConfirm = (paymentModes) => {
@@ -836,172 +844,10 @@ const PaymentModal = ({
     try {
       setIsProcessing(true);
 
+      // 1. Ensure order exists and is synchronized (Always forceSave to move status out of OC)
+      const orderId = await ensureOrderExists(true);
+
       const user = JSON.parse(localStorage.getItem("user"));
-      const posId = JSON.parse(localStorage.getItem("posId"));
-
-      let transactionTypeId = 1;
-      if (activeTab === 'Take Away' || activeTab === 'TakeAway') {
-        transactionTypeId = 2;
-      } else if (activeTab === 'Home Delivery') {
-        transactionTypeId = 3;
-      }
-
-      const tableId = selectedTable?.tableId || 0;
-      const actualOrderId = existingOrderId || 0;
-      const orderDate = salesDateISO || localStorage.getItem('salesDate') || new Date().toISOString();
-
-      // 1. Handle void items if any
-      if (voidedItems.length > 0 && actualOrderId !== 0) {
-        const voidPayload = {
-          token: {
-            date_of_token: orderDate,
-            outlet_id: 1,
-            counter_id: posId || 1,
-            order_id: actualOrderId
-          },
-          items: voidedItems.map((item) => ({
-            token_id: 0,
-            item_id: getPureItemId(item),
-            quantity: item.quantity
-          }))
-        };
-
-        try {
-          await saveItemVoid(voidPayload);
-        } catch (error) {
-          console.error("❌ Void API Error:", error);
-          throw new Error(`Failed to void items: ${error.message || 'Unknown error'}`);
-        }
-      }
-
-      // 2. Identify new items that haven't been sent yet
-      const newItems = selectedItems.filter(item => {
-        if (item.isVoided) return false;
-        const itemKey = `${item.id || item.itemId}_${item.variantId || 0}_${item.description || ''}`.toLowerCase();
-        const alreadySent = sentItems.some(sentKey => sentKey.toLowerCase() === itemKey);
-        return !alreadySent;
-      });
-
-      // 3. Only save if there are changes or it's a new order
-      const shouldSave = newItems.length > 0 || voidedItems.length > 0 || actualOrderId === 0 || selectedDiscount !== null || Object.keys(categoryDiscounts).length > 0;
-
-      let orderId = actualOrderId;
-
-      if (shouldSave) {
-        const orderItemsDetails = [];
-
-        // Add voided items with negative quantity (for saveOrder API)
-        if (voidedItems.length > 0) {
-          voidedItems.forEach((item) => {
-            const itemId = getPureItemId(item);
-            orderItemsDetails.push({
-              itemId: itemId,
-              itemPrice: item.price,
-              itemQty: -item.quantity,
-              itemDisc: item.discount || 0,
-              discType: item.discType || "None",
-              itemname: item.name,
-              ModifierItem: item.modifierItem || 0,
-              addDetails: item.description && item.description.trim() ? item.description.trim() : "",
-              variantId: item.variantId || 0,
-              variantName: item.variantName || "",
-              openItemid: 0,
-              is_complimentary: item.isComplimentary || false,
-              subcategoryId: item.subcategoryId || 0
-            });
-          });
-        }
-
-        // Add new items
-        newItems.forEach((item) => {
-          const itemId = getPureItemId(item);
-          const subId = item.subcategoryId || 0;
-          const categoryDisc = categoryDiscounts[subId] || 0;
-
-          orderItemsDetails.push({
-            itemId: itemId,
-            itemPrice: item.price,
-            itemQty: item.quantity,
-            itemDisc: categoryDisc > 0 ? categoryDisc : (item.discount || 0),
-            discType: item.discType || "None",
-            itemname: item.name,
-            ModifierItem: item.modifierItem || 0,
-            addDetails: item.description && item.description.trim() ? item.description.trim() : "",
-            variantId: item.variantId || 0,
-            variantName: item.variantName || "",
-            openItemid: 0,
-            is_complimentary: item.isComplimentary || false,
-            subcategoryId: item.subcategoryId || 0
-          });
-
-          if (item.description && item.description.trim()) {
-            orderItemsDetails.push({
-              itemId: 0,
-              itemPrice: 0,
-              itemQty: 0,
-              itemDisc: 0,
-              discType: "",
-              itemname: `[${item.description.trim()}]`,
-              ModifierItem: String(itemId),
-              addDetails: "",
-              variantId: 0,
-              variantName: "",
-              openItemid: 0,
-              is_complimentary: false,
-              subcategoryId: 0
-            });
-          }
-        });
-
-        // Bill-level discount amount for SaveOrder (same as "Bill Discount" in Payment modal)
-        const subTotalForDisc = selectedItems.filter(i => !i.isVoided).reduce((s, i) => s + (i.price * i.quantity), 0);
-        const individualItemDisc = selectedItems.filter(i => !i.isVoided).reduce((s, i) => s + ((i.discount || 0) * i.quantity), 0);
-        const billLevelDiscAmt = selectedDiscount
-          ? parseFloat(((subTotalForDisc - individualItemDisc) * (selectedDiscount.discountPercentage / 100)).toFixed(2))
-          : 0;
-
-        const orderPayload = {
-          SaveOrderRequest: {
-            orderDetails: {
-              orderText: activeTab === 'Dine In' && selectedTable
-                ? `Table ${selectedTable.Section_name} ${selectedTable.name}`
-                : `${activeTab} Order`,
-              orderId: actualOrderId,
-              orderDate: orderDate,
-              customerId: customerDetails ? 1 : 0,
-              transactionType: transactionTypeId,
-              sectionTable: Number(tableId) || 0,
-              PAX: numPersons || 1,
-              chairNo: 0,
-              outletId: 1,
-              kotNo: kotNumber,
-              kotBy: user?.id || 0,
-              posId: posId || 1,
-              discAmt: billLevelDiscAmt,
-              orderItemsDetails: orderItemsDetails
-            },
-            orderstatus: 0
-          }
-        };
-
-        const saveResponse = await saveOrder(orderPayload);
-
-        // Extract order ID
-        if (saveResponse?.orderId) orderId = saveResponse.orderId;
-        else if (saveResponse?.OrderId) orderId = saveResponse.OrderId;
-        else if (saveResponse?.data?.orderId) orderId = saveResponse.data.orderId;
-        else if (saveResponse?.data?.OrderId) orderId = saveResponse.data.OrderId;
-        else if (saveResponse?.SaveOrderResponse?.orderId) orderId = saveResponse.SaveOrderResponse.orderId;
-        else if (saveResponse?.SaveOrderResponse?.OrderId) orderId = saveResponse.SaveOrderResponse.OrderId;
-
-        if (!orderId || orderId === 0) {
-          throw new Error("Failed to save order - no order ID returned");
-        }
-
-        if (actualOrderId === 0 && setExistingOrderId) {
-          setExistingOrderId(orderId);
-        }
-      }
 
       // 4. Print the check
       const categoryDiscountsList = Object.keys(categoryDiscounts)
@@ -1069,7 +915,9 @@ const PaymentModal = ({
         setShowCustomerModal(false);
 
         try {
-          const orderId = await ensureOrderExists();
+          const orderId = await ensureOrderExists(true);
+          // Sync backend state before final bill save
+          await getOrderDetails(orderId);
 
           const user = JSON.parse(localStorage.getItem("user"));
           const posId = JSON.parse(localStorage.getItem("posId"));
@@ -1106,27 +954,6 @@ const PaymentModal = ({
 
           const items = uniqueItems.map((item, index) => {
             const basePrice = item.price * item.quantity;
-            const itemDiscount = (item.discount || 0) * item.quantity;
-            const priceAfterDiscount = basePrice - itemDiscount;
-
-            let itemGstTotal = 0;
-            let totalTaxRate = 0;
-
-            if (item.TaxItems && Array.isArray(item.TaxItems) && item.TaxItems.length > 0) {
-              const activeTaxMappings = item.TaxItems.filter(t => t.isActive === true);
-
-              activeTaxMappings.forEach(taxMapping => {
-                const taxDetails = getTaxDetailsById(taxMapping.taxId);
-                if (taxDetails && (taxDetails.transactionId === transactionTypeId || taxDetails.transactionId === 0)) {
-                  const taxAmount = (priceAfterDiscount * taxDetails.taxPercentage) / 100;
-                  itemGstTotal += taxAmount;
-                  totalTaxRate += taxDetails.taxPercentage;
-                }
-              });
-            }
-
-            const priceAfterGst = priceAfterDiscount + itemGstTotal;
-
             return {
               item_barcode: item.barcode || `ITEM${String(index + 1).padStart(3, '0')}`,
               id: getPureItemId(item),
@@ -1135,34 +962,30 @@ const PaymentModal = ({
               item_quantity: item.quantity,
               item_rate: item.price,
               base_price: basePrice,
-              item_discount: itemDiscount,
-              price_after_discount: priceAfterDiscount,
-              item_gst_rate: totalTaxRate,
-              item_gst_total: parseFloat(itemGstTotal.toFixed(2)),
-              price_after_gst: parseFloat(priceAfterGst.toFixed(2)),
+              item_discount: 0,
+              price_after_discount: 0,
+              item_gst_rate: 0,
+              item_gst_total: 0,
+              price_after_gst: 0,
               item_description: item.description || "",
-              addDetails: item.description || ""
+              addDetails: item.description || "",
+              is_complimentary: true
             };
           });
 
           const paymentSummary = {
             subTotal: totals.subTotal,
-            itemDiscount: totals.subTotal,
+            itemDiscount: 0,
+            billLevelDiscount: 0,
+            discountPercentage: 0,
             operatorDiscount: 0,
-            taxBreakdown: totals.taxBreakdown,
-            totalTaxAmount: totals.totalTaxAmount,
-            cgstTotal: totals.cgstTotal,
-            sgstTotal: totals.sgstTotal,
+            taxBreakdown: {},
+            totalTaxAmount: 0,
+            cgstTotal: 0,
+            sgstTotal: 0,
             serviceCharge: 0,
             roundOff: 0,
             grandTotal: 0
-          };
-
-          paymentSummary.discountDetails = {
-            discountId: 0,
-            discountName: "No Charge (NC)",
-            discountPercentage: 100,
-            discountAmount: totals.subTotal
           };
 
           const billPayload = {
@@ -1297,7 +1120,9 @@ const PaymentModal = ({
     setIsProcessing(true);
 
     try {
-      const orderId = await ensureOrderExists();
+      const orderId = await ensureOrderExists(true);
+      // Sync backend state before final bill save
+      await getOrderDetails(orderId);
       console.log('💳 Processing payment for Order ID:', orderId);
 
       const user = JSON.parse(localStorage.getItem("user"));
@@ -1462,300 +1287,406 @@ const PaymentModal = ({
     setShowDiscountModal(true);
   };
 
+  const handleDiscountToggle = () => {
+    executeWithPermission(PERMISSIONS.DISCOUNT, 'Discount', () => {
+      const nextMode = viewMode === 'discounts' ? 'denominations' : 'discounts';
+      setViewMode(nextMode);
+
+      // Lazily fetch discounts only when opening discount view and not yet loaded
+      if (nextMode === 'discounts' && allDiscounts.length === 0) {
+        const fetchDiscountsNow = async () => {
+          try {
+            setDiscountsLoading(true);
+            const { getDiscounts } = await import('../services/apicall');
+            const response = await getDiscounts();
+            const discountsData = Array.isArray(response) ? response : (response?.data || []);
+            const activeDiscounts = discountsData.filter(d =>
+              (d.isactive === true || d.isActive === true || d.status === 1) &&
+              (parseFloat(d.discountPercentage) > 0)
+            );
+            setAllDiscounts(activeDiscounts);
+          } catch (error) {
+            console.error('Failed to fetch discounts:', error);
+          } finally {
+            setDiscountsLoading(false);
+          }
+        };
+        fetchDiscountsNow();
+      }
+    });
+  };
+
+  const handleClearDiscount = () => {
+    if (selectedSidebarCategory !== null) {
+      setCategoryDiscounts(prev => {
+        const updated = { ...prev };
+        delete updated[selectedSidebarCategory];
+        return updated;
+      });
+      showToast(`Cleared discount for category`, 'info');
+    } else {
+      handleApplyDiscount(null);
+      showToast(`Cleared bill discount`, 'info');
+    }
+  };
+
+  const handleSplitOrder = () => {
+    setShowMultiPayModal(true);
+  };
+
+  const callSupport = () => {
+    const whatsappUrl = 'https://wa.me/919686067462';
+    window.open(whatsappUrl, '_blank');
+  };
+
+  const handleDayClose = () => {
+    setShowDayClosePopup(true);
+  };
+
+  const confirmDayClose = () => {
+    setShowDayClosePopup(false);
+    // Logout logic
+    localStorage.removeItem('isLoggedIn');
+    localStorage.removeItem('user');
+    localStorage.removeItem('loginTime');
+    sessionStorage.clear();
+    showToast('Logged out successfully', 'success');
+    setTimeout(() => {
+      navigate('/login', { replace: true });
+    }, 1000);
+  };
+
+  const cancelDayClose = () => {
+    setShowDayClosePopup(false);
+  };
+
   return (
     <>
       {toast.show && (
-        <div className={`fixed top-4 right-4 z-[60] px-6 py-3 rounded-lg shadow-lg transition-all duration-300 ${toast.type === 'success' ? 'bg-green-500 text-white' :
+        <div className={`fixed top-4 right-4 z-[100] px-6 py-3 rounded-lg shadow-lg transition-all duration-300 ${toast.type === 'success' ? 'bg-green-500 text-white' :
           toast.type === 'error' ? 'bg-red-500 text-white' :
             'bg-blue-500 text-white'
           }`}>
-          <div className="flex items-center gap-2">
-            {toast.type === 'success' && (
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-              </svg>
-            )}
-            {toast.type === 'error' && (
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-              </svg>
-            )}
-            {toast.type === 'info' && (
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-              </svg>
-            )}
-            <span className="font-medium text-sm">{toast.message}</span>
-          </div>
+          <span className="font-medium text-sm">{toast.message}</span>
         </div>
       )}
 
       {confirmDialog.show && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-bold text-black mb-3">{confirmDialog.title}</h3>
-            <p className="text-sm text-gray-700 whitespace-pre-line mb-6">{confirmDialog.message}</p>
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 text-black">
+            <h3 className="text-lg font-bold mb-3">{confirmDialog.title}</h3>
+            <p className="text-sm border-b pb-4 mb-4 whitespace-pre-line">{confirmDialog.message}</p>
             <div className="flex gap-3 justify-end">
-              <button
-                onClick={confirmDialog.onCancel}
-                className="px-4 py-2 bg-gray-200 text-black rounded hover:bg-gray-300 font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmDialog.onConfirm}
-                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 font-bold"
-              >
-                Confirm
-              </button>
+              <button onClick={confirmDialog.onCancel} className="px-5 py-2.5 bg-gray-200 rounded font-bold">CANCEL</button>
+              <button onClick={confirmDialog.onConfirm} className="px-5 py-2.5 bg-red-600 text-white rounded font-bold">CONFIRM</button>
             </div>
           </div>
         </div>
       )}
 
-      <div className={`fixed inset-0 z-50 flex items-center justify-center p-2 transition-all duration-300 ${isVisible ? 'bg-black bg-opacity-50' : 'bg-black bg-opacity-0'
-        }`} onClick={(e) => { if (e.target === e.currentTarget && !isProcessing) onClose(); }}>
-        <div className={`relative bg-white rounded-lg shadow-2xl border border-gray-300 w-full max-w-[420px] max-h-[95vh] overflow-hidden transform transition-all duration-300 ${isVisible ? 'scale-100 opacity-100 translate-y-0' : 'scale-95 opacity-0 translate-y-4'
-          }`} onClick={(e) => e.stopPropagation()}>
+      <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4 font-sans transition-opacity duration-300">
+        <div
+          className={`w-[90%] max-w-[1280px] h-[85vh] bg-[#f8f9fa] rounded-2xl shadow-2xl flex overflow-hidden transform transition-all duration-300 ${isOpen ? 'scale-100 opacity-100' : 'scale-95 opacity-0 pointer-events-none'}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Main Split Layout */}
+          <div className="flex-1 flex overflow-hidden">
 
-          <div className="bg-white text-black px-3 py-2 relative border-b border-gray-300">
-            <button
-              onClick={onClose}
-              disabled={isProcessing}
-              className="absolute top-1.5 right-1.5 w-5 h-5 bg-gray-100 hover:bg-gray-200 rounded flex items-center justify-center"
-            >
-              <X className="w-3.5 h-3.5 text-gray-600" />
-            </button>
-
-            <div className="flex items-center gap-1.5">
-              <div>
-                <h2 className="text-base font-bold text-black">Payment</h2>
-                {selectedTable?.name && (
-                  <p className="text-[11px] text-gray-600 leading-tight">
-                    Table: {selectedTable.name}
-                  </p>
-                )}
-                {customerDetails && (
-                  <p className="text-[11px] text-green-600 leading-tight">
-                    👤 {customerDetails.name} ({customerDetails.mobile})
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="p-2 max-h-[calc(95vh-120px)] overflow-y-auto bg-white">
-
-            <div className="bg-white border border-gray-300 rounded shadow-sm mb-2">
-              <div className="bg-gray-50 px-2 py-1.5 border-b border-gray-300">
-                <h3 className="text-xs font-bold text-black flex items-center gap-1">
-                  📋 Sales Summary
-                </h3>
+            {/* Left Sidebar: Summary & Total Breakdown */}
+            <div className="w-[30%] max-w-[400px] bg-white border-r flex flex-col shadow-sm">
+              <div className="p-4 border-b flex justify-between items-center">
+                <h2 className="text-xl font-bold text-gray-800">Summary</h2>
+                <div className="text-sm font-bold text-red-500">
+                  Bill No: <span className="text-red-500">{billNumber || '-'}</span>
+                </div>
               </div>
 
-              <div className="p-2">
-                {taxesLoading ? (
-                  <div className="text-center py-3">
-                    <div className="inline-block w-5 h-5 border-2 border-gray-600 border-t-transparent rounded-full animate-spin" />
-                    <p className="text-xs text-gray-600 mt-1">Loading taxes...</p>
+              {/* Scrollable Item List */}
+              <div className="flex-1 overflow-y-auto">
+                <div className="divide-y">
+                  {selectedItems.map((item, idx) => (
+                    <div key={idx} className="p-2 flex items-center hover:bg-gray-50 transition-colors text-xs border-b">
+                      <div className="flex-1 text-gray-900 font-medium truncate pr-2" title={item.name}>{item.name}</div>
+                      <div className="w-12 text-center text-gray-900 text-xs font-medium">{item.quantity}</div>
+                      <div className="w-20 text-right text-gray-900 text-xs font-medium">
+                        {(item.price * item.quantity).toFixed(2)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Sidebar Footer: Detailed breakdown */}
+              <div className="p-2 bg-gray-50 border-t space-y-1">
+                <div className="space-y-1 text-sm font-bold text-gray-600">
+                  <div className="flex justify-between">
+                    <span>Gross Total</span>
+                    <span>{totals.subTotal.toFixed(2)}</span>
                   </div>
-                ) : (
-                  <div className="space-y-1 text-xs">
+
+                  {totals.itemDiscount > 0 && (
+                    <>
+                      <div className="flex justify-between text-red-600">
+                        <span>Discount {selectedDiscount?.discountPercentage ? `(${selectedDiscount.discountPercentage}%)` : ''}</span>
+                        <span>-{totals.itemDiscount.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold border-t border-gray-200">
+                        <span>After Discount</span>
+                        <span>{(totals.subTotal - totals.itemDiscount).toFixed(2)}</span>
+                      </div>
+                    </>
+                  )}
+
+                  {Object.entries(totals.taxBreakdown).map(([key, val]) => (
+                    <div key={key} className="flex justify-between">
+                      <span className="uppercase">{key}</span>
+                      <span>{val.amount.toFixed(2)}</span>
+                    </div>
+                  ))}
+
+                  {totals.serviceCharge > 0 && (
+                    <div className="flex justify-between">
+                      <span>Service Charge</span>
+                      <span>{totals.serviceCharge.toFixed(2)}</span>
+                    </div>
+                  )}
+
+                  {Math.abs(totals.roundOff) !== 0 && (
+                    <div className="flex justify-between">
+                      <span>Round Off</span>
+                      <span>{totals.roundOff.toFixed(2)}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-[#2a6d8d] pt-1 mt-1">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-gray-800 uppercase tracking-wider">Grand Total</span>
+                    <span className="text-2xl font-bold text-Black-800 ">₹{totals.grandTotal.toFixed(2)}</span>
+                  </div>
+                </div>
+
+                {/* Payment Details in Sidebar */}
+                {parseFloat(enteredAmount) > 0 && (
+                  <div className="mt-1 space-y-1 border-t pt-1">
+                    <div className="flex justify-between text-sm font-bold text-gray-600">
+                      <span className="uppercase text-xs">Tendered</span>
+                      <span className="text-[#2a6d8d] font-black text-sm">₹{parseFloat(enteredAmount).toFixed(2)}</span>
+                    </div>
 
                     <div className="flex justify-between items-center">
-                      <span className="text-gray-700">Sub Total</span>
-                      <span className="font-semibold text-black">
-                        ₹{totals.subTotal.toFixed(2)}
+                      <span className={`text-[10px] font-bold uppercase ${parseFloat(enteredAmount) >= totals.grandTotal ? 'text-green-600' : 'text-red-600'}`}>
+                        {parseFloat(enteredAmount) >= totals.grandTotal ? 'Change To Return' : 'Balance To Pay'}
+                      </span>
+                      <span className={`text-lg font-black ${parseFloat(enteredAmount) >= totals.grandTotal ? 'text-green-600' : 'text-red-600'}`}>
+                        ₹{Math.abs(totals.grandTotal - parseFloat(enteredAmount)).toFixed(2)}
                       </span>
                     </div>
+                  </div>
+                )}
 
-                    {totals.individualItemDiscount > 0 && (
-                      <div className="flex justify-between items-center text-green-600">
-                        <span className="flex items-center gap-1">
-                          <FaPercentage className="text-[10px]" />
-                          Item Discount
-                        </span>
-                        <span className="font-semibold">
-                          -₹{totals.individualItemDiscount.toFixed(2)}
-                        </span>
-                      </div>
-                    )}
-
-                    {totals.billLevelDiscount > 0 && (
-                      <div className="flex justify-between items-center text-green-600">
-                        <span className="flex items-center gap-1">
-                          <FaPercentage className="text-[10px]" />
-                          Bill Discount {selectedDiscount ? `(${selectedDiscount.discountPercentage}%)` : ''}
-                        </span>
-                        <span className="font-semibold">
-                          -₹{totals.billLevelDiscount.toFixed(2)}
-                        </span>
-                      </div>
-                    )}
-
-                    {totals.itemDiscount > 0 && (
-                      <div className="flex justify-between items-center border-t border-gray-200 pt-1">
-                        <span className="text-gray-700">Subtotal After Discount</span>
-                        <span className="font-semibold text-black">
-                          ₹{(totals.subTotal - totals.itemDiscount).toFixed(2)}
-                        </span>
-                      </div>
-                    )}
-
-                    {Object.entries(totals.taxBreakdown).length > 0 && (
-                      <div className="border-t border-gray-200 pt-1 space-y-1">
-                        {Object.entries(totals.taxBreakdown).map(([taxKey, taxData]) => (
-                          <div key={taxKey} className="flex justify-between items-center">
-                            <span className="text-gray-700">{taxKey}</span>
-                            <span className="font-semibold text-black">
-                              ₹{taxData.amount.toFixed(2)}
-                            </span>
-                          </div>
-                        ))}
-                        <div className="flex justify-between items-center text-gray-700">
-                          <span className="font-medium">Total Tax</span>
-                          <span className="font-semibold">
-                            ₹{totals.totalTaxAmount.toFixed(2)}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    {totals.roundOff !== 0 && (
-                      <div className="flex justify-between items-center border-t border-gray-200 pt-1">
-                        <span className="text-gray-700">Round Off</span>
-                        <span
-                          className={`font-semibold ${totals.roundOff >= 0 ? 'text-black' : 'text-red-600'
-                            }`}
-                        >
-                          {totals.roundOff >= 0 ? '+' : ''}
-                          ₹{totals.roundOff.toFixed(2)}
-                        </span>
-                      </div>
-                    )}
-
-                    <div className="flex justify-between items-center pt-1.5 border-t-2 border-gray-400 mt-1.5">
-                      <span className="text-black font-bold text-sm">Net Amount</span>
-                      <span className="font-bold text-black text-base">
-                        ₹{totals.grandTotal.toFixed(2)}
-                      </span>
-                    </div>
+                {!enteredAmount && (
+                  <div className="mt-1 pt-1 border-t flex justify-between items-center">
+                    <span className="text-[10px] font-bold uppercase text-red-600">Balance To Pay</span>
+                    <span className="text-lg font-black text-red-600">₹{totals.grandTotal.toFixed(2)}</span>
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="mb-2">
-              <button
-                onClick={() => setShowDiscountModal(true)}
-                disabled={isProcessing}
-                className={`w-full px-2 py-1.5 text-xs font-bold rounded border ${selectedDiscount
-                  ? 'bg-green-600 text-white border-green-600'
-                  : 'bg-white text-black border-gray-300 hover:border-gray-400'
-                  } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                {selectedDiscount
-                  ? `Discount: ${selectedDiscount.discountPercentage}%`
-                  : 'Apply Discount'}
-              </button>
-            </div>
+            {/* Right Panel: Content Area */}
+            <div className="flex-1 flex flex-col p-4 overflow-y-auto">
 
-            <div className="mb-2">
-              <button
-                onClick={() => setShowCategoryDiscountModal(true)}
-                disabled={isProcessing}
-                className={`w-full px-2 py-1.5 text-xs font-bold rounded border ${Object.keys(categoryDiscounts).length > 0
-                  ? 'bg-blue-600 text-white border-blue-600'
-                  : 'bg-white text-black border-gray-300 hover:border-gray-400'
-                  } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                {Object.keys(categoryDiscounts).length > 0
-                  ? `Category Disc Applied`
-                  : 'Category Discount'}
-              </button>
-            </div>
-
-            <div className="bg-white border border-gray-300 rounded shadow-sm mb-2">
-              <div className="bg-gray-50 px-2 py-1.5 border-b border-gray-300">
-                <h4 className="text-xs font-bold text-black">💳 Payment Method</h4>
-              </div>
-
-              <div className="p-2">
-                <div className="grid grid-cols-2 gap-1.5">
-                  {paymentMethods.map((method) => {
-                    const Icon = method.icon;
-                    return (
-                      <button
-                        key={method.id}
-                        onClick={() => handlePaymentModeSelect(method)}
-                        disabled={isProcessing}
-                        className={`p-2 text-[11px] font-bold rounded border flex items-center justify-center gap-1 ${selectedPaymentMode === method.code
-                          ? 'bg-green-600 text-white border-green-600'
-                          : 'bg-white text-black border-gray-300 hover:border-gray-400'
-                          } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      >
-                        <Icon className="text-xs" />
-                        <span>{method.name}</span>
-                      </button>
-                    );
-                  })}
-
+              {/* Header Tabs */}
+              <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center gap-4 text-sm font-semibold">
                   <button
-                    onClick={() => setShowMultiPayModal(true)}
-                    disabled={isProcessing}
-                    className="p-2 text-[11px] font-bold rounded border bg-white text-black border-gray-300 hover:border-gray-400 flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={() => setViewMode('denominations')}
+                    className={`px-3 py-1 rounded transition-colors font-bold ${viewMode === 'denominations' ? 'bg-[#d1f2f2] text-gray-900' : 'text-gray-900 hover:text-black'}`}
                   >
-                    <span>💳 Multi-Pay</span>
+                    Tender
+                  </button>
+                  <div className="w-[1px] h-4 bg-gray-300"></div>
+                  <button
+                    onClick={handleDiscountToggle}
+                    className={`px-3 py-1 rounded transition-colors font-bold ${viewMode === 'discounts' ? 'bg-[#d1f2f2] text-gray-900' : 'text-gray-900 hover:text-black'}`}
+                  >
+                    Discount
+                  </button>
+                  <div className="w-[1px] h-4 bg-gray-300"></div>
+                  <button
+                    onClick={handleClearDiscount}
+                    className="px-3 py-1 text-gray-900 hover:text-black transition-colors font-bold"
+                  >
+                    Clear Discount
+                  </button>
+                  <div className="w-[1px] h-4 bg-gray-300"></div>
+                  <button
+                    onClick={handleNC}
+                    className="px-3 py-1 text-gray-900 hover:text-black transition-colors font-bold"
+                  >
+                    NC
+                  </button>
+                  <div className="w-[1px] h-4 bg-gray-300"></div>
+                  <button
+                    onClick={handleOrderCancel}
+                    className="px-3 py-1 text-gray-900 hover:text-black transition-colors font-bold"
+                  >
+                    Order Cancel
                   </button>
                 </div>
               </div>
-            </div>
 
-          </div>
+              {/* Tab Content */}
+              <div className="flex-1">
+                {viewMode === 'denominations' ? (
+                  <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2">
+                    {/* Tender Tab: Amount Display */}
+                    <div className="space-y-2">
+                      <h2 className="text-lg font-bold text-gray-800">Amount</h2>
+                      <div className="bg-white border rounded-xl p-4 shadow-sm flex items-center justify-center gap-8">
+                        <div className="text-lg font-bold text-gray-800 border-r pr-8">
+                          Total Due: <span className="text-[#2a6d8d]">{totals.grandTotal.toFixed(2)}</span>
+                        </div>
+                        <div className="text-lg font-bold text-gray-800">
+                          Tendered: <span className="text-[#2a6d8d]">{enteredAmount || '0.00'}</span>
+                        </div>
+                      </div>
+                    </div>
 
-          <div className="bg-white border-t border-gray-300 px-3 py-3">
-            <div className="flex justify-between gap-2 mb-2">
-              <button
-                onClick={handleNC}
-                disabled={isProcessing}
-                className="flex-1 px-3 py-2 bg-white text-black border-2 border-gray-300 hover:border-gray-400 rounded font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isProcessing ? 'PROCESSING...' : '💳 NC'}
-              </button>
-              <button
-                onClick={handleOrderCancel}
-                disabled={isProcessing || !existingOrderId || existingOrderId === 0}
-                className="flex-1 px-3 py-2 bg-white text-black border-2 border-gray-300 hover:border-gray-400 rounded font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isProcessing ? 'PROCESSING...' : '🗑️ CANCEL'}
-              </button>
-            </div>
+                    <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
+                      {/* Numpad row with vertical dividers */}
+                      <div className="flex border-b">
+                        {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((num, i) => (
+                          <button
+                            key={num}
+                            onClick={() => handleNumpadClick(num.toString())}
+                            className={`flex-1 h-12 flex items-center justify-center text-2xl font-bold text-gray-800 hover:bg-gray-100 transition-colors ${i !== 9 ? 'border-r' : ''}`}
+                          >
+                            {num}
+                          </button>
+                        ))}
+                      </div>
 
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={handleCheck}
-                disabled={isProcessing}
-                className="px-4 py-2 bg-white text-black border-2 border-gray-300 hover:border-gray-400 rounded font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-              >
-                {isProcessing ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-gray-600 border-t-transparent rounded-full animate-spin" />
-                    CHECK
-                  </>
+                      {/* Action row: Exact Amount, Backspace, Denominations */}
+                      <div className="flex items-center justify-between px-6 py-4">
+                        <button
+                          onClick={() => setEnteredAmount(totals.grandTotal.toString())}
+                          className="text-lg font-medium text-gray-800 hover:text-[#2a6d8d] transition-colors"
+                        >
+                          Exact Amount
+                        </button>
+
+                        <button onClick={handleBackspace} className="text-gray-800 hover:text-red-500 transition-colors">
+                          <X className="w-7 h-7" />
+                        </button>
+
+                        <div className="flex gap-8 font-bold text-[#2a6d8d] text-lg">
+                          <button onClick={() => handleDenominationClick(50)} className="underline underline-offset-4 decoration-1">₹50</button>
+                          <button onClick={() => handleDenominationClick(100)} className="underline underline-offset-4 decoration-1">₹100</button>
+                          <button onClick={() => handleDenominationClick(500)} className="underline underline-offset-4 decoration-1">₹500</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 ) : (
-                  '🖨️ CHECK'
+                  <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+                    {/* Discount Tab */}
+                    <div className="space-y-2">
+                      <h2 className="text-lg font-bold text-gray-800">Discount Selection</h2>
+                      <div className="bg-white border rounded-xl p-4 shadow-sm">
+                        <div className="flex flex-wrap gap-2 mb-4">
+                          {allDiscounts.map(disc => (
+                            <button
+                              key={disc.discountId}
+                              onClick={() => handleApplyDiscount(disc)}
+                              className="w-24 h-24 bg-[#d1f2f2] border-2 border-[#b5e6e6] rounded-lg flex flex-col items-center justify-center gap-1 hover:bg-[#b5e6e6] transition-all p-2 text-center"
+                            >
+                              <span className="text-sm font-black text-gray-900 leading-tight line-clamp-3">
+                                {disc.discountName || disc.discountCategory || `${disc.discountPercentage}%`}
+                              </span>
+                            </button>
+                          ))}
+                          {/* <button className="w-40 h-24 bg-[#d1f2f2] border-2 border-gray-400 rounded-lg flex flex-col items-center justify-center p-2 text-center leading-tight hover:bg-[#b5e6e6] transition-all">
+                            <span className="text-xs font-black text-gray-900">Customised Discount</span>
+                          </button> */}
+                        </div>
+
+                        {/* <div className="flex items-center justify-end gap-3 pr-2 border-t pt-2">
+                          <label className="text-xs font-bold text-gray-800">Custom % Value:</label>
+                          <input
+                            type="text"
+                            className="w-24 p-1 border-2 rounded-lg text-right font-bold text-base"
+                          />
+                          <button className="px-4 py-1 bg-[#d1f2f2] border-gray-400 border text-gray-900 font-bold rounded shadow-sm hover:bg-[#b5e6e6] transition-colors text-sm">
+                            Apply
+                          </button>
+                        </div> */}
+                      </div>
+                    </div>
+                  </div>
                 )}
-              </button>
+
+                {/* Payment Methods Section (Always Visible) */}
+                <div className="mt-8 space-y-3">
+                  <h2 className="text-lg font-bold text-gray-800">Payment Methods</h2>
+                  <div className="grid grid-cols-5 gap-2">
+                    <button
+                      onClick={() => handlePaymentModeSelect({ code: 'Cash' })}
+                      className="h-16 bg-[#d1f2f2] rounded-xl flex items-center justify-center text-base font-bold text-gray-900 shadow-sm hover:bg-[#b5e6e6] transition-all"
+                    >
+                      Cash
+                    </button>
+                    <button
+                      onClick={() => handlePaymentModeSelect({ code: 'Card' })}
+                      className="h-16 bg-[#d1f2f2] rounded-xl flex items-center justify-center gap-2 text-base font-bold text-gray-900 shadow-sm hover:bg-[#b5e6e6] transition-all"
+                    >
+                      Card <FaCreditCard className="w-5 h-5" />
+                    </button>
+                    <button
+                      onClick={() => handlePaymentModeSelect({ code: 'UPI' })}
+                      className="h-16 bg-[#d1f2f2] rounded-xl flex items-center justify-center text-base font-bold text-gray-900 shadow-sm hover:bg-[#b5e6e6] transition-all"
+                    >
+                      <span className="text-xl italic font-black text-gray-900">UPI<span className="text-orange-500">▶</span></span>
+                    </button>
+                    <button
+                      className="h-16 bg-[#d1f2f2] rounded-xl flex items-center justify-center text-base font-bold text-gray-900 shadow-sm hover:bg-[#b5e6e6] transition-all"
+                    >
+                      Others
+                    </button>
+                    <button
+                      onClick={handleSplitOrder}
+                      className="h-16 bg-[#d1f2f2] rounded-xl flex items-center justify-center text-base font-bold text-gray-900 shadow-sm hover:bg-[#b5e6e6] transition-all"
+                    >
+                      Split
+                    </button>
+
+                    <button
+                      onClick={handleCheck}
+                      className="h-16 bg-[#d1f2f2] rounded-xl flex items-center justify-center gap-2 text-base font-bold text-gray-900 shadow-sm hover:bg-[#b5e6e6] transition-all"
+                    >
+                      Check Print <span className="text-xl">🖨️</span>
+                    </button>
+                    <button
+                      onClick={onClose}
+                      className="h-16 bg-[#d1f2f2] rounded-xl flex items-center justify-center text-base font-bold text-gray-900 shadow-sm hover:bg-[#b5e6e6] transition-all"
+                    >
+                      Back to Menu
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <DiscountModal
-        isOpen={showDiscountModal}
-        onClose={() => setShowDiscountModal(false)}
-        onApplyDiscount={handleApplyDiscount}
-        selectedDiscount={selectedDiscount}
+      <OrderCancelModal
+        isOpen={showCancelModal}
+        onClose={() => setShowCancelModal(false)}
+        onSubmit={handleCancelSubmit}
+        billNumber={billNumber}
+        totalAmount={totals.grandTotal}
       />
 
       <CustomerDetailsModal
@@ -1767,14 +1698,6 @@ const PaymentModal = ({
         buttonText="Confirm NC"
         buttonIcon="💳"
         modalTitle="💳 No Charge - Customer Details"
-      />
-
-      <OrderCancelModal
-        isOpen={showCancelModal}
-        onClose={() => setShowCancelModal(false)}
-        onSubmit={handleCancelSubmit}
-        billNumber={billNumber}
-        totalAmount={totals.grandTotal}
       />
 
       <MultiPayModal
@@ -1790,6 +1713,17 @@ const PaymentModal = ({
         selectedItems={selectedItems}
         onApplyCategoryDiscounts={(discounts) => setCategoryDiscounts(discounts)}
         existingCategoryDiscounts={categoryDiscounts}
+      />
+      <SettingsSidebar
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        handleDayClose={handleDayClose}
+      />
+
+      <DayClosePopup
+        isOpen={showDayClosePopup}
+        onConfirm={confirmDayClose}
+        onCancel={cancelDayClose}
       />
     </>
   );

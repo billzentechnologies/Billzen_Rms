@@ -1,18 +1,25 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, dialog } = require('electron');
 const path = require('path');
+
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=256');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+
 const isDev = process.env.NODE_ENV === 'development';
 
 function createWindow() {
     const win = new BrowserWindow({
         width: 1200,
         height: 800,
-        webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: false,
-        },
-        icon: path.join(__dirname, '../public/billzenrms.png'),
+        icon: path.join(__dirname, '../src/assets/billzenrms.png'),
         show: false,
         center: true,
+
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            backgroundThrottling: true
+        }
     });
 
     win.setMenu(null);
@@ -22,9 +29,7 @@ function createWindow() {
         win.show();
     });
 
-    // Override the close behavior - add confirmation
     win.on('close', (e) => {
-        const { dialog } = require('electron');
         const response = dialog.showMessageBoxSync(win, {
             type: 'question',
             buttons: ['Cancel', 'Close'],

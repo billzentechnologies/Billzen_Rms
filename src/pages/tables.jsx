@@ -5,8 +5,9 @@ import SettingsSidebar from '../components/SettingsSidebar';
 import DayClosePopup from '../components/DayClosePopup';
 import { getTables, getOrderDetails, getTableChildren, getItems } from '../services/apicall';
 
-const PaxNumberPad = ({ onClose, onConfirm }) => {
+const PaxNumberPad = ({ onClose, onConfirm, showAlert, isAlertActive }) => {
   const [value, setValue] = useState('');
+  const inputRef = useRef(null);
 
   const handleKeyPress = (key) => {
     if (key === 'esc') {
@@ -15,14 +16,56 @@ const PaxNumberPad = ({ onClose, onConfirm }) => {
       if (value && !isNaN(value) && parseInt(value) > 0) {
         onConfirm(value);
       } else {
-        alert('Please enter a valid number');
+        if (showAlert) {
+          showAlert('Please enter a valid number');
+        } else {
+          alert('Please enter a valid number');
+        }
       }
     } else if (key === 'clear') {
-      setValue('');
+      setValue((prev) => prev.slice(0, -1));
+    } else if (key === '.') {
+      setValue((prev) => prev.includes('.') ? prev : prev + '.');
     } else {
       setValue((prev) => prev + key);
     }
   };
+
+  // ✅ Auto-refocus input when alert is closed
+  useEffect(() => {
+    if (!isAlertActive && inputRef.current) {
+      setTimeout(() => {
+        inputRef.current.focus();
+      }, 50);
+    }
+  }, [isAlertActive]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Don't process keyboard if an alert is active
+      if (isAlertActive) return;
+
+      if (e.key >= '0' && e.key <= '9') {
+        e.preventDefault();
+        handleKeyPress(e.key);
+      } else if (e.key === '.') {
+        e.preventDefault();
+        handleKeyPress('.');
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        handleKeyPress('enter');
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        handleKeyPress('esc');
+      } else if (e.key === 'Backspace') {
+        e.preventDefault();
+        handleKeyPress('clear');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [value, isAlertActive]);
 
   const keys = [
     '1', '2', '3',
@@ -35,20 +78,22 @@ const PaxNumberPad = ({ onClose, onConfirm }) => {
   return (
     <div className="grid grid-cols-3 gap-2">
       <input
-        className="col-span-3 border p-2 text-center font-semibold text-lg"
+        ref={inputRef}
+        className="col-span-3 border p-2 text-center font-semibold text-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-400"
         value={value}
         readOnly
+        autoFocus
       />
       {keys.map((key, i) => (
         <button
           key={i}
-          className={`p-2 rounded text-sm font-medium border ${key === 'enter'
-            ? 'col-span-3 bg-green-500 text-white'
+          className={`p-2 rounded text-sm font-medium border transition-colors active:scale-95 ${key === 'enter'
+            ? 'col-span-3 bg-green-500 text-white hover:bg-green-600'
             : key === 'esc'
-              ? 'bg-gray-300'
+              ? 'bg-gray-300 hover:bg-gray-400'
               : key === 'clear'
-                ? 'bg-red-500 text-white'
-                : 'bg-gray-100'
+                ? 'bg-red-500 text-white hover:bg-red-600'
+                : 'bg-gray-100 hover:bg-gray-200'
             }`}
           onClick={() => handleKeyPress(key)}
         >
@@ -996,6 +1041,8 @@ const TablePage = () => {
             <PaxNumberPad
               onClose={() => setShowPaxModal(false)}
               onConfirm={handlePaxModalConfirm}
+              showAlert={showAlert}
+              isAlertActive={!!alertMessage}
             />
           </div>
         </div>

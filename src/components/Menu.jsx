@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, X } from 'lucide-react';
 import { getItems, getSubCategories, getItemVariants } from '../services/apicall';
 import VariantPopup from './VariantPopup';
@@ -16,6 +16,7 @@ const Menu = ({
   numPersons,
 }) => {
   const searchInputRef = React.useRef(null);
+  const dropdownRef = useRef(null);
   const [items, setItems] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -28,6 +29,10 @@ const Menu = ({
 
   const [showCustomizeModal, setShowCustomizeModal] = useState(false);
   const [customizeItem, setCustomizeItem] = useState(null);
+
+  // Search dropdown state
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [showDropdown, setShowDropdown] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -64,7 +69,20 @@ const Menu = ({
     };
 
     fetchData();
-  }, []); // Run only once on mount
+  }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setShowDropdown(false);
+        setHighlightedIndex(-1);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+  // Run only once on mount
 
   useEffect(() => {
     const handleRefocus = () => {
@@ -314,6 +332,46 @@ const Menu = ({
     });
   };
 
+  // Search results for dropdown (max 10 items)
+  const searchResults = searchQuery && searchQuery.trim() !== ''
+    ? items
+      .filter(item => {
+        const itemName = item.itemName || item.item_name || item.name || item.title || '';
+        return item.isActive !== false && itemName.toLowerCase().includes(searchQuery.toLowerCase());
+      })
+      .slice(0, 10)
+    : [];
+
+  // Handle keyboard navigation on search input
+  const handleSearchKeyDown = (e) => {
+    if (!showDropdown || searchResults.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex(prev => (prev + 1) % searchResults.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex(prev => (prev <= 0 ? searchResults.length - 1 : prev - 1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (highlightedIndex >= 0 && searchResults[highlightedIndex]) {
+        handleDropdownSelect(searchResults[highlightedIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      setShowDropdown(false);
+      setHighlightedIndex(-1);
+      setSearchQuery('');
+    }
+  };
+
+  // Handle selecting an item from the dropdown
+  const handleDropdownSelect = (item) => {
+    setShowDropdown(false);
+    setHighlightedIndex(-1);
+    setSearchQuery('');
+    handleItemClick(item);
+  };
+
   // ✅ UPDATED: Search across all items when searchQuery is present, ignore subcategory filter
   const filteredMenuItems = items.filter(item => {
     const itemName = item.itemName || item.item_name || item.name || item.title || '';
@@ -342,7 +400,6 @@ const Menu = ({
     return matchesCategory && isActive;
   });
 
-  // Loading state handled inline now
 
   if (error) {
     return (
@@ -365,7 +422,8 @@ const Menu = ({
   return (
     <>
       <div className="flex-1 flex flex-col p-2 sm:p-4 overflow-hidden">
-        <div className="mb-4">
+        {/* Search Input with Dropdown */}
+        <div className="mb-4" ref={dropdownRef}>
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <Search className="h-5 w-5 text-gray-400" />
@@ -376,15 +434,46 @@ const Menu = ({
               className="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm"
               placeholder="Search menu items..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setShowDropdown(true);
+                setHighlightedIndex(-1);
+              }}
+              onFocus={() => searchQuery && setShowDropdown(true)}
+              onKeyDown={handleSearchKeyDown}
+              autoComplete="off"
             />
             {searchQuery && (
               <button
-                onClick={() => setSearchQuery('')}
+                onClick={() => { setSearchQuery(''); setShowDropdown(false); setHighlightedIndex(-1); }}
                 className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none"
               >
                 <X className="h-4 w-4" />
               </button>
+            )}
+
+            {/* Dropdown Results */}
+            {showDropdown && searchResults.length > 0 && (
+              <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-y-auto">
+                {searchResults.map((item, idx) => {
+                  const itemName = item.itemName || item.item_name || item.name || item.title || 'Item';
+                  const { price: itemPrice } = getSectionPriceAndTax(item);
+                  return (
+                    <div
+                      key={item.itemId || idx}
+                      className={`flex items-center justify-between px-4 py-2 cursor-pointer text-sm transition-colors ${highlightedIndex === idx
+                        ? 'bg-blue-50 text-blue-800'
+                        : 'hover:bg-gray-50 text-gray-800'
+                        }`}
+                      onMouseEnter={() => setHighlightedIndex(idx)}
+                      onMouseDown={(e) => { e.preventDefault(); handleDropdownSelect(item); }}
+                    >
+                      <span className="font-medium truncate flex-1 pr-4">{itemName}</span>
+                      <span className="text-green-600 font-bold shrink-0">₹{itemPrice.toFixed(2)}</span>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>

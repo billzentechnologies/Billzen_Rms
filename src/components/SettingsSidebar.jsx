@@ -115,13 +115,6 @@ const SettingsSidebar = ({ isOpen, onClose, handleDayClose }) => {
         permission: PERMISSIONS.PETTY_CASH // 🔐 Requires PETTY_CASH permission (ID: 10)
       },
       {
-        title: 'Day Close',
-        color: 'orange',
-        isDayClose: true,
-        show: true,
-        permission: PERMISSIONS.DAY_CLOSE // 🔐 Requires DAY_CLOSE permission (ID: 8)
-      },
-      {
         title: 'Admin Page',
         color: 'indigo',
         isExternal: true,

@@ -39,6 +39,8 @@
   },
   "build": {
     "appId": "com.resturant.pos",
+    "productName": "BillzenRMS",
+    "executableName": "billzenrms",
     "directories": {
       "output": "dist"
     },
@@ -47,11 +49,17 @@
       "build/**/*",
       "electron/**/*",
       "public/billzenrms.png",
+      "electron-build-resources/**/*",
       "!electron/config.json"
     ],
     "win": {
       "target": "nsis",
-      "icon": "public/billzenrms.png"
+      "icon": "public/billzenrms.png",
+      "artifactName": "BillzenRMS_Setup_${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
     },
     "extraResources": [
       {

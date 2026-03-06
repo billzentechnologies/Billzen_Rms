@@ -83,6 +83,7 @@ const Reports = () => {
   const [ncReportsAPI, setNcReportsAPI] = useState([]);
   const [itemComplimentaryReportsAPI, setItemComplimentaryReportsAPI] = useState([]);
   const [categorySectionReport, setCategorySectionReport] = useState(null);
+  const [globalSections, setGlobalSections] = useState([]);
   const [companyInfo, setCompanyInfo] = useState(null);
   const [salesSummary, setSalesSummary] = useState(null);
   const [salesSummaryLoading, setSalesSummaryLoading] = useState(false);
@@ -123,6 +124,28 @@ const Reports = () => {
     };
     fetchCompanyData();
 
+    const fetchSectionsData = async () => {
+      try {
+        const data = await getSectionWiseReport(filters.fromDate, filters.toDate);
+        if (data && data.data) {
+          const uniqueSections = [];
+          const seenIds = new Set();
+          data.data.forEach(s => {
+            const name = s.sectionName || s.SectionName;
+            const id = s.sectionId || s.SectionId;
+            if (name && !seenIds.has(id)) {
+              uniqueSections.push({ id, name });
+              seenIds.add(id);
+            }
+          });
+          setGlobalSections(uniqueSections.sort((a, b) => a.name.localeCompare(b.name)));
+        }
+      } catch (error) {
+        console.error('Failed to fetch sections list:', error);
+      }
+    };
+    fetchSectionsData();
+
     setReports(JSON.parse(localStorage.getItem('reports') || '[]'));
     setVoidReports(JSON.parse(localStorage.getItem('voidReports') || '[]'));
     setCancelReports(JSON.parse(localStorage.getItem('cancelReports') || '[]'));
@@ -159,8 +182,8 @@ const Reports = () => {
       // 1. Item-wise report: only date filters
       fetchSalesSummary(null, null);
     } else if (activeTab === 'sectionWise') {
-      // 2. Section-wise report: transactionType must be 1
-      fetchSalesSummary(null, 1);
+      // 2. Section-wise report: transactionType must be 1, include section filter
+      fetchSalesSummary(filters.section, 1);
     } else if (activeTab === 'categorySectionReport' || activeTab === 'subCategoryReport') {
       // 3. Category/Subcategory reports: include all filters
       fetchSalesSummary(filters.section, filters.transactionType);
@@ -203,7 +226,6 @@ const Reports = () => {
   useEffect(() => {
     if (activeTab === 'sectionWise' && filters.fromDate && filters.toDate) {
       fetchSectionWiseReport();
-      fetchDiscountReport();
     }
   }, [activeTab, filters.fromDate, filters.toDate]);
 
@@ -538,9 +560,12 @@ const Reports = () => {
   if (sectionWiseReportsAPI.length > 0) {
     sectionWiseReportsAPI.forEach(section => {
       const sectionName = section.sectionName || section.SectionName || 'Uncategorized';
+      const sectionId = section.sectionId || section.SectionId;
+      const key = sectionId || sectionName;
 
-      if (!sectionWiseData[sectionName]) {
-        sectionWiseData[sectionName] = {
+      if (!sectionWiseData[key]) {
+        sectionWiseData[key] = {
+          name: sectionName,
           items: [],
           sectionTotal: section.sectionTotal || 0
         };
@@ -548,7 +573,7 @@ const Reports = () => {
 
       if (section.items && Array.isArray(section.items)) {
         section.items.forEach(item => {
-          sectionWiseData[sectionName].items.push({
+          sectionWiseData[key].items.push({
             name: item.productDescription || item.ProductDescription || '',
             category: item.category || item.Category || '',
             quantity: Number(item.quantity || item.Quantity || 0),
@@ -559,15 +584,6 @@ const Reports = () => {
       }
     });
   }
-
-  const totalDiscountAmount = discountReportsAPI.reduce(
-    (sum, item) => sum + Number(item.discountAmount || item.DiscountAmount || 0),
-    0
-  );
-
-  const sections = [...new Set(sectionWiseReportsAPI.map(section =>
-    section.sectionName || section.SectionName
-  ).filter(Boolean))].sort();
 
   const sectionCategories = [...new Set(
     sectionWiseReportsAPI.flatMap(section =>
@@ -874,7 +890,7 @@ const Reports = () => {
                 />
               </div>
 
-              {activeTab === 'sectionWise' && (
+              {(activeTab === 'sectionWise' || activeTab === 'categorySectionReport' || activeTab === 'subCategoryReport') && (
                 <>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Section</label>
@@ -884,8 +900,8 @@ const Reports = () => {
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     >
                       <option value="">All Sections</option>
-                      {sections.map((sec, i) => (
-                        <option key={i} value={sec}>{sec}</option>
+                      {globalSections.map((sec, i) => (
+                        <option key={i} value={sec.id}>{sec.name}</option>
                       ))}
                     </select>
                   </div>
@@ -1038,62 +1054,38 @@ const Reports = () => {
                     </tbody>
                   </table>
 
-                  {/* Sales Summary from API - at end of report, matches report table theme */}
                   {summaryData && (
-                    <table className="w-full text-sm border-collapse border-t-2 border-gray-300 mt-0">
+                    <table className="w-full text-sm border-collapse border-t-2 border-gray-300 mt-4">
                       <tbody>
-                        <tr><td colSpan={3} className="py-2 border-b border-gray-300 border-dashed" /></tr>
-                        <tr className="border-b border-gray-200 bg-gray-50/50">
+                        <tr className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
                           <td className="py-2 px-3 text-gray-700 font-medium">Total</td>
-                          <td colSpan={2} className="py-2 px-3 text-right text-gray-800 font-medium">{Number(summaryData.GrossAmount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td className="py-2 px-3 text-right text-gray-900 font-semibold">{Number(summaryData.GrossAmount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                         </tr>
-                        <tr className="border-b border-gray-200 bg-gray-50/50">
+                        <tr className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
                           <td className="py-2 px-3 text-gray-700 font-medium">NoCash</td>
-                          <td colSpan={2} className="py-2 px-3 text-right text-gray-800 font-medium">{Number(summaryData.NoCash).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td className="py-2 px-3 text-right text-gray-900 font-semibold">{Number(summaryData.NoCash).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                         </tr>
-                        <tr className="border-b border-gray-200 bg-gray-50/50">
+                        <tr className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
                           <td className="py-2 px-3 text-gray-700 font-medium">Discount</td>
-                          <td colSpan={2} className="py-2 px-3 text-right text-gray-800 font-medium">{Number(summaryData.Discount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td className="py-2 px-3 text-right text-red-600 font-semibold">{Number(summaryData.Discount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                         </tr>
-                        <tr className="border-b border-gray-200 bg-gray-50/50">
+                        <tr className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
                           <td className="py-2 px-3 text-gray-700 font-medium">CGST</td>
-                          <td colSpan={2} className="py-2 px-3 text-right text-gray-800 font-medium">{Number(summaryData.CGST).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td className="py-2 px-3 text-right text-gray-900 font-semibold">{Number(summaryData.CGST).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                         </tr>
-                        <tr className="border-b border-gray-200 bg-gray-50/50">
+                        <tr className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
                           <td className="py-2 px-3 text-gray-700 font-medium">SGST</td>
-                          <td colSpan={2} className="py-2 px-3 text-right text-gray-800 font-medium">{Number(summaryData.SGST).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td className="py-2 px-3 text-right text-gray-900 font-semibold">{Number(summaryData.SGST).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                         </tr>
                         <tr className="bg-gray-100 border-b border-gray-300 font-semibold text-gray-800">
                           <td className="py-2.5 px-3">Grand Total</td>
-                          <td colSpan={2} className="py-2.5 px-3 text-right font-bold text-gray-900">{Number(summaryData.NetAmount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td className="py-2.5 px-3 text-right font-bold text-gray-900">{Number(summaryData.NetAmount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                         </tr>
                       </tbody>
                     </table>
                   )}
-
-                  {/* Category-wise Summary Footer */}
-                  {summaryData && (
-                    <div className="mt-8 border-t-2 border-gray-300 pt-4">
-                      <h4 className="text-md font-bold text-gray-800 mb-2">Consolidated Summary</h4>
-                      <table className="w-full text-sm border-collapse">
-                        <tbody>
-                          <tr className="border-b border-gray-200">
-                            <td className="py-2 px-3 text-gray-700">Gross Sales</td>
-                            <td className="py-2 px-3 text-right font-semibold">{Number(summaryData.GrossAmount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                          </tr>
-                          <tr className="border-b border-gray-200">
-                            <td className="py-2 px-3 text-gray-700">Total Tax</td>
-                            <td className="py-2 px-3 text-right font-semibold">{Number(summaryData.SGST + summaryData.CGST).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                          </tr>
-                          <tr className="bg-gray-50 font-bold border-b border-gray-300">
-                            <td className="py-2.5 px-3 uppercase text-blue-800">Net Revenue</td>
-                            <td className="py-2.5 px-3 text-right text-blue-900">{Number(summaryData.NetAmount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
                 </div>
+
               )}
             </ReportWrapper>
           )}
@@ -1181,30 +1173,7 @@ const Reports = () => {
                     </tfoot>
                   </table>
 
-                  {/* Sales Summary consolidated footer */}
-                  {summaryData && (
-                    <div className="mt-8 border-t-2 border-gray-300 pt-4 bg-gray-50 p-4 rounded-lg">
-                      <h4 className="text-md font-bold text-gray-800 mb-3 border-b pb-2">Consolidated Sales Summary</h4>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div className="flex justify-between items-center bg-white p-3 rounded border shadow-sm">
-                          <span className="text-gray-600 font-medium">Gross Amount</span>
-                          <span className="text-gray-900 font-bold">₹{Number(summaryData.GrossAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                        </div>
-                        <div className="flex justify-between items-center bg-white p-3 rounded border shadow-sm">
-                          <span className="text-gray-600 font-medium">Discount</span>
-                          <span className="text-gray-900 font-bold text-red-600">₹{Number(summaryData.Discount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                        </div>
-                        <div className="flex justify-between items-center bg-white p-3 rounded border shadow-sm">
-                          <span className="text-gray-600 font-medium">Tax (GST)</span>
-                          <span className="text-gray-900 font-bold">₹{Number(summaryData.SGST + summaryData.CGST).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                        </div>
-                        <div className="flex justify-between items-center bg-blue-50 p-3 rounded border border-blue-200 shadow-sm sm:col-span-2 lg:col-span-3">
-                          <span className="text-blue-800 font-bold uppercase tracking-wider">Net Payable</span>
-                          <span className="text-blue-900 font-black text-lg">₹{Number(summaryData.NetAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                  {/* Sales Summary consolidated footer moved to relevant tabs */}
                 </div>
               )}
             </ReportWrapper>
@@ -1413,6 +1382,7 @@ const Reports = () => {
                       <tr className="bg-gray-100 border-t border-b border-gray-300 text-gray-800 font-semibold sticky top-0 z-10">
                         <th className="py-2 px-3 bg-gray-100">Date</th>
                         <th className="py-2 px-3 bg-gray-100">Order No</th>
+                        <th className="py-2 px-3 bg-gray-100">Transaction</th>
                         <th className="py-2 px-3 bg-gray-100">Table</th>
                         <th className="py-2 px-3 bg-gray-100">Items</th>
                         <th className="py-2 px-3 bg-gray-100 text-right">Amount</th>
@@ -1437,7 +1407,7 @@ const Reports = () => {
                         if (filteredData.length === 0) {
                           return (
                             <tr>
-                              <td colSpan={7} className="py-8 text-center text-gray-500">
+                              <td colSpan={8} className="py-8 text-center text-gray-500">
                                 {filters.fromDate && filters.toDate
                                   ? 'No void records found for the selected date range'
                                   : 'Please select a date range to view void report'}
@@ -1458,6 +1428,9 @@ const Reports = () => {
                             </td>
                             <td className="py-1 px-3">
                               {e.OrderNo || e.billNumber || ''}
+                            </td>
+                            <td className="py-1 px-3">
+                              {e.TransactionName || e.transactionName || ''}
                             </td>
                             <td className="py-1 px-3">
                               {e.Table || e.tableNumber || ''}
@@ -1507,7 +1480,7 @@ const Reports = () => {
                         return (
                           <tfoot>
                             <tr className="font-semibold border-t border-gray-300 text-gray-800 bg-white">
-                              <td colSpan={4} className="text-right py-2 px-3">
+                              <td colSpan={5} className="text-right py-2 px-3">
                                 Total voided amount
                               </td>
                               <td className="py-2 px-3 text-right">
@@ -1542,6 +1515,7 @@ const Reports = () => {
                       <tr className="bg-gray-100 border-t border-b border-gray-300 text-gray-800 font-semibold sticky top-0 z-10">
                         <th className="py-2 px-3 bg-gray-100">Date</th>
                         <th className="py-2 px-3 bg-gray-100">Order No</th>
+                        <th className="py-2 px-3 bg-gray-100">Transaction</th>
                         <th className="py-2 px-3 bg-gray-100">Table</th>
                         <th className="py-2 px-3 bg-gray-100">Items</th>
                         <th className="py-2 px-3 bg-gray-100 text-right">Amount</th>
@@ -1566,7 +1540,7 @@ const Reports = () => {
                         if (filteredData.length === 0) {
                           return (
                             <tr>
-                              <td colSpan={7} className="py-8 text-center text-gray-500">
+                              <td colSpan={8} className="py-8 text-center text-gray-500">
                                 {filters.fromDate && filters.toDate
                                   ? 'No cancel records found for the selected date range'
                                   : 'Please select a date range to view cancel report'}
@@ -1587,6 +1561,9 @@ const Reports = () => {
                             </td>
                             <td className="py-1 px-3">
                               {e.OrderNo || e.billNumber || ''}
+                            </td>
+                            <td className="py-1 px-3">
+                              {e.TransactionName || e.transactionName || ''}
                             </td>
                             <td className="py-1 px-3">
                               {e.Table || e.tableNumber || ''}
@@ -1636,7 +1613,7 @@ const Reports = () => {
                         return (
                           <tfoot>
                             <tr className="font-semibold border-t border-gray-300 text-gray-800 bg-white">
-                              <td colSpan={4} className="text-right py-2 px-3">
+                              <td colSpan={5} className="text-right py-2 px-3">
                                 Total canceled amount
                               </td>
                               <td className="py-2 px-3 text-right">
@@ -1671,6 +1648,7 @@ const Reports = () => {
                       <tr className="bg-gray-100 border-t border-b border-gray-300 text-gray-800 font-semibold sticky top-0 z-10">
                         <th className="py-2 px-3 bg-gray-100">Date</th>
                         <th className="py-2 px-3 bg-gray-100">Bill No</th>
+                        <th className="py-2 px-3 bg-gray-100">Transaction</th>
                         <th className="py-2 px-3 bg-gray-100">Table</th>
                         <th className="py-2 px-3 bg-gray-100">Section</th>
                         <th className="py-2 px-3 bg-gray-100">Items</th>
@@ -1714,7 +1692,7 @@ const Reports = () => {
                         if (filteredData.length === 0) {
                           return (
                             <tr>
-                              <td colSpan={8} className="py-8 text-center text-gray-500">
+                              <td colSpan={9} className="py-8 text-center text-gray-500">
                                 {filters.fromDate && filters.toDate
                                   ? 'No NC (No Charge) records found for the selected date range'
                                   : 'Please select a date range to view NC report'}
@@ -1763,6 +1741,7 @@ const Reports = () => {
                             >
                               <td className="py-1 px-3">{displayDate}</td>
                               <td className="py-1 px-3">{orderNo}</td>
+                              <td className="py-1 px-3">{e.TransactionName || e.transactionName || ''}</td>
                               <td className="py-1 px-3">{tableNo}</td>
                               <td className="py-1 px-3">{sectionName}</td>
                               <td className="py-1 px-3">
@@ -1832,7 +1811,7 @@ const Reports = () => {
                         return (
                           <tfoot>
                             <tr className="font-semibold border-t border-gray-300 text-gray-800 bg-white">
-                              <td colSpan={5} className="text-right py-2 px-3">
+                              <td colSpan={6} className="text-right py-2 px-3">
                                 Total NC amount
                               </td>
                               <td className="py-2 px-3 text-right">
@@ -1869,6 +1848,7 @@ const Reports = () => {
                       <tr className="bg-gray-100 border-t border-b border-gray-300 text-gray-800 font-semibold sticky top-0 z-10">
                         <th className="py-2 px-3 bg-gray-100">Date</th>
                         <th className="py-2 px-3 bg-gray-100">Bill No</th>
+                        <th className="py-2 px-3 bg-gray-100">Transaction</th>
                         <th className="py-2 px-3 bg-gray-100">Table</th>
                         <th className="py-2 px-3 bg-gray-100 text-right">Original Amount</th>
                         <th className="py-2 px-3 bg-gray-100 text-right">Discount Amount</th>
@@ -1892,7 +1872,7 @@ const Reports = () => {
                         if (filteredData.length === 0) {
                           return (
                             <tr>
-                              <td colSpan={8} className="py-8 text-center text-gray-500">
+                              <td colSpan={9} className="py-8 text-center text-gray-500">
                                 {filters.fromDate && filters.toDate
                                   ? 'No discount records found for the selected date range'
                                   : 'Please select a date range to view discount report'}
@@ -1915,6 +1895,9 @@ const Reports = () => {
                             </td>
                             <td className="py-1 px-3">
                               {e.billNo || e.BillNo || e.billNumber || ''}
+                            </td>
+                            <td className="py-1 px-3">
+                              {e.TransactionName || e.transactionName || ''}
                             </td>
                             <td className="py-1 px-3">
                               {e.table || e.Table || e.TableNo || e.tableNumber || 'N/A'}
@@ -1961,7 +1944,7 @@ const Reports = () => {
                         return (
                           <tfoot>
                             <tr className="font-semibold border-t border-gray-300 text-gray-800 bg-white">
-                              <td colSpan={4} className="text-right py-2 px-3">
+                              <td colSpan={5} className="text-right py-2 px-3">
                                 Total discount given
                               </td>
                               <td className="py-2 px-3 text-right text-red-600">
@@ -2092,136 +2075,111 @@ const Reports = () => {
               {loading ? (
                 <div className="py-8 text-center text-gray-500">Loading...</div>
               ) : (
-                <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 320px)' }}>
-                  <table className="w-full text-sm text-left border-collapse">
-                    <thead>
-                      <tr className="bg-gray-100 border-t border-b border-gray-300 text-gray-800 font-semibold sticky top-0 z-10">
-                        <th className="py-2 px-3 bg-gray-100">Product Description</th>
-                        <th className="py-2 px-3 bg-gray-100">Category</th>
-                        <th className="py-2 px-3 bg-gray-100 text-right">Quantity</th>
-                        <th className="py-2 px-3 bg-gray-100 text-right">Rate</th>
-                        <th className="py-2 px-3 bg-gray-100 text-right">Net Value</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {Object.keys(sectionWiseData).length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="py-8 text-center text-gray-500">
-                            {filters.fromDate && filters.toDate
-                              ? 'No section-wise data found for the selected date range'
-                              : 'Please select a date range to view section-wise report'}
-                          </td>
+                <>
+                  <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 320px)' }}>
+                    <table className="w-full text-sm text-left border-collapse">
+                      <thead>
+                        <tr className="bg-gray-100 border-t border-b border-gray-300 text-gray-800 font-semibold sticky top-0 z-10">
+                          <th className="py-2 px-3 bg-gray-100">Product Description</th>
+                          <th className="py-2 px-3 bg-gray-100">Category</th>
+                          <th className="py-2 px-3 bg-gray-100 text-right">Quantity</th>
+                          <th className="py-2 px-3 bg-gray-100 text-right">Rate</th>
+                          <th className="py-2 px-3 bg-gray-100 text-right">Net Value</th>
                         </tr>
-                      ) : (
-                        Object.entries(sectionWiseData)
-                          .filter(([section]) => !filters.section || section === filters.section)
-                          .map(([section, data]) => {
-                            const filteredItems = data.items.filter(
-                              item => !filters.category || item.category === filters.category
-                            );
-
-                            const filteredQty = filteredItems.reduce((sum, item) => sum + item.quantity, 0);
-                            const filteredGross = filteredItems.reduce((sum, item) => sum + item.gross, 0);
-
-                            if (filteredItems.length === 0) return null;
-
-                            return (
-                              <React.Fragment key={section}>
-                                <tr className="bg-gray-50 border-t-2 border-gray-400">
-                                  <td colSpan={5} className="py-2 px-3 font-semibold text-gray-800">
-                                    Section: {section}
-                                  </td>
-                                </tr>
-
-                                {filteredItems.map((item, idx) => (
-                                  <tr key={idx} className="border-b border-gray-200 text-gray-700 hover:bg-gray-50">
-                                    <td className="py-1 px-3 pl-6">{item.name}</td>
-                                    <td className="py-1 px-3">{item.category}</td>
-                                    <td className="py-1 px-3 text-right">{item.quantity.toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
-                                    <td className="py-1 px-3 text-right">{item.rate.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                    <td className="py-1 px-3 text-right font-semibold text-black">
-                                      {item.gross.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </td>
-                                  </tr>
-                                ))}
-
-                                <tr className="bg-gray-100 border-b-2 border-gray-300 font-semibold text-gray-800">
-                                  <td className="py-2 px-3">Subtotal</td>
-                                  <td className="py-2 px-3"></td>
-                                  <td className="py-2 px-3 text-right">{filteredQty.toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
-                                  <td className="py-2 px-3"></td>
-                                  <td className="py-2 px-3 text-right">{filteredGross.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                </tr>
-                              </React.Fragment>
-                            );
-                          })
-                      )}
-                    </tbody>
-
-                    {Object.keys(sectionWiseData).length > 0 &&
-                      Object.entries(sectionWiseData)
-                        .filter(([section]) => !filters.section || section === filters.section)
-                        .some(([, data]) =>
-                          data.items.filter(item => !filters.category || item.category === filters.category).length > 0
-                        ) && (
-                        <tfoot>
-                          <tr className="font-bold border-t-2 border-gray-400 text-gray-900 bg-gray-100">
-                            <td className="py-2 px-3">Grand Total</td>
-                            <td className="py-2 px-3"></td>
-                            <td className="py-2 px-3 text-right">
-                              {Object.entries(sectionWiseData)
-                                .filter(([section]) => !filters.section || section === filters.section)
-                                .flatMap(([, data]) =>
-                                  data.items.filter(item => !filters.category || item.category === filters.category)
-                                )
-                                .reduce((sum, item) => sum + item.quantity, 0)
-                                .toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
-                            </td>
-                            <td className="py-2 px-3"></td>
-                            <td className="py-2 px-3 text-right">
-                              {Object.entries(sectionWiseData)
-                                .filter(([section]) => !filters.section || section === filters.section)
-                                .flatMap(([, data]) =>
-                                  data.items.filter(item => !filters.category || item.category === filters.category)
-                                )
-                                .reduce((sum, item) => sum + item.gross, 0)
-                                .toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </thead>
+                      <tbody>
+                        {Object.keys(sectionWiseData).length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="py-8 text-center text-gray-500">
+                              {filters.fromDate && filters.toDate
+                                ? 'No section-wise data found for the selected date range'
+                                : 'Please select a date range to view section-wise report'}
                             </td>
                           </tr>
+                        ) : (
+                          Object.entries(sectionWiseData)
+                            .filter(([id]) => !filters.section || String(id) === String(filters.section))
+                            .map(([key, data]) => {
+                              const section = data.name;
+                              const filteredItems = data.items.filter(
+                                item => !filters.category || item.category === filters.category
+                              );
 
-                          {/* Discount Deduction Row - Only show when no filters are applied */}
-                          {totalDiscountAmount > 0 && !filters.section && !filters.category && (
-                            <tr className="font-semibold border-t border-gray-300 text-red-600 bg-red-50">
-                              <td colSpan={4} className="py-2 px-3 text-right">
-                                Less: Total Discount
-                              </td>
-                              <td className="py-2 px-3 text-right">
-                                -{totalDiscountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </td>
-                            </tr>
-                          )}
+                              const filteredQty = filteredItems.reduce((sum, item) => sum + item.quantity, 0);
+                              const filteredGross = filteredItems.reduce((sum, item) => sum + item.gross, 0);
 
-                          {/* Net Total After Discount - Only show when no filters are applied */}
-                          {!filters.section && !filters.category && (
-                            <tr className="font-bold border-t-2 border-gray-400 text-gray-900 bg-gray-200">
-                              <td colSpan={4} className="py-2 px-3 text-right">
-                                Net Total (After Discount)
-                              </td>
-                              <td className="py-2 px-3 text-right">
-                                {(Object.entries(sectionWiseData)
-                                  .filter(([section]) => !filters.section || section === filters.section)
-                                  .flatMap(([, data]) =>
-                                    data.items.filter(item => !filters.category || item.category === filters.category)
-                                  )
-                                  .reduce((sum, item) => sum + item.gross, 0) - totalDiscountAmount)
-                                  .toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </td>
-                            </tr>
-                          )}
-                        </tfoot>
-                      )}
-                  </table>
-                </div>
+                              if (filteredItems.length === 0) return null;
+
+                              return (
+                                <React.Fragment key={section}>
+                                  <tr className="bg-gray-50 border-t-2 border-gray-400">
+                                    <td colSpan={5} className="py-2 px-3 font-semibold text-gray-800">
+                                      Section: {section}
+                                    </td>
+                                  </tr>
+
+                                  {filteredItems.map((item, idx) => (
+                                    <tr key={idx} className="border-b border-gray-200 text-gray-700 hover:bg-gray-50">
+                                      <td className="py-1 px-3 pl-6">{item.name}</td>
+                                      <td className="py-1 px-3">{item.category}</td>
+                                      <td className="py-1 px-3 text-right">{item.quantity.toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
+                                      <td className="py-1 px-3 text-right">{item.rate.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                      <td className="py-1 px-3 text-right font-semibold text-black">
+                                        {item.gross.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </td>
+                                    </tr>
+                                  ))}
+
+                                  <tr className="bg-gray-100 border-b-2 border-gray-300 font-semibold text-gray-800">
+                                    <td className="py-2 px-3">Subtotal</td>
+                                    <td className="py-2 px-3"></td>
+                                    <td className="py-2 px-3 text-right">{filteredQty.toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
+                                    <td className="py-2 px-3"></td>
+                                    <td className="py-2 px-3 text-right">{filteredGross.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                  </tr>
+                                </React.Fragment>
+                              );
+                            })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {summaryData && (
+                    <div className="mt-8 border-t-2 border-gray-300 pt-0">
+                      <table className="w-full text-sm border-collapse border-t border-gray-200">
+                        <tbody>
+                          <tr className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
+                            <td className="py-2 px-4 text-gray-700 font-medium">Total</td>
+                            <td className="py-2 px-4 text-right text-gray-900 font-semibold">{Number(summaryData.GrossAmount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          </tr>
+                          <tr className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
+                            <td className="py-2 px-4 text-gray-700 font-medium">NoCash</td>
+                            <td className="py-2 px-4 text-right text-gray-900 font-semibold">{Number(summaryData.NoCash).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          </tr>
+                          <tr className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
+                            <td className="py-2 px-4 text-gray-700 font-medium">Discount</td>
+                            <td className="py-2 px-4 text-right text-red-600 font-semibold">{Number(summaryData.Discount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          </tr>
+                          <tr className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
+                            <td className="py-2 px-4 text-gray-700 font-medium">CGST</td>
+                            <td className="py-2 px-4 text-right text-gray-900 font-semibold">{Number(summaryData.CGST).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          </tr>
+                          <tr className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
+                            <td className="py-2 px-4 text-gray-700 font-medium">SGST</td>
+                            <td className="py-2 px-4 text-right text-gray-900 font-semibold">{Number(summaryData.SGST).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          </tr>
+                          <tr className="bg-gray-50 border-b border-gray-300">
+                            <td className="py-3 px-4 text-gray-900 font-bold text-base">Grand Total</td>
+                            <td className="py-3 px-4 text-right text-gray-900 font-black text-base">
+                              {Number(summaryData.NetAmount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
               )}
             </ReportWrapper>
           )}
@@ -2340,64 +2298,101 @@ const Reports = () => {
                 }
                 let grandTotal = 0;
                 return (
-                  <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 320px)' }}>
-                    <table className="w-full text-sm text-left border-collapse">
-                      <thead>
-                        <tr className="bg-gray-100 border-t border-b border-gray-300 text-gray-800 font-semibold sticky top-0 z-10">
-                          <th className="py-2 px-3 bg-gray-100">Category</th>
-                          <th className="py-2 px-3 bg-gray-100">Section</th>
-                          <th className="py-2 px-3 bg-gray-100 text-right">Amount</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((row, i) => {
-                          const categoryName = row.categoryName ?? row.categoryId ?? '—';
-                          const sections = Array.isArray(row.sections) ? row.sections : [];
-                          const categoryTotal = typeof row.totalAmount === 'number' ? row.totalAmount : sections.reduce((s, sec) => s + (Number(sec.amount) || 0), 0);
-                          grandTotal += categoryTotal;
-                          return (
-                            <React.Fragment key={i}>
-                              {sections.length === 0 ? (
-                                <tr className="border-b border-gray-200 text-gray-700 hover:bg-gray-50">
-                                  <td className="py-1 px-3 font-medium text-gray-800">{categoryName}</td>
-                                  <td className="py-1 px-3">—</td>
-                                  <td className="py-1 px-3 text-right font-semibold text-gray-900">
-                                    {Number(categoryTotal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                  </td>
-                                </tr>
-                              ) : (
-                                <>
-                                  {sections.map((sec, j) => (
-                                    <tr key={`${i}-${j}`} className="border-b border-gray-200 text-gray-700 hover:bg-gray-50">
-                                      <td className="py-1 px-3 font-medium text-gray-800">{categoryName}</td>
-                                      <td className="py-1 px-3">{sec.sectionName ?? sec.sectionId ?? '—'}</td>
-                                      <td className="py-1 px-3 text-right font-semibold text-gray-900">
-                                        {typeof sec.amount === 'number' ? Number(sec.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : (sec.amount ?? '—')}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                  <tr className="bg-gray-100 border-b-2 border-gray-300 font-semibold text-gray-800">
-                                    <td className="py-2 px-3" colSpan={2}>Subtotal ({categoryName})</td>
-                                    <td className="py-2 px-3 text-right">
+                  <>
+                    <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 320px)' }}>
+                      <table className="w-full text-sm text-left border-collapse">
+                        <thead>
+                          <tr className="bg-gray-100 border-t border-b border-gray-300 text-gray-800 font-semibold sticky top-0 z-10">
+                            <th className="py-2 px-3 bg-gray-100">Category</th>
+                            <th className="py-2 px-3 bg-gray-100">Section</th>
+                            <th className="py-2 px-3 bg-gray-100 text-right">Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((row, i) => {
+                            const categoryName = row.categoryName ?? row.categoryId ?? '—';
+                            const sections = Array.isArray(row.sections) ? row.sections : [];
+                            const categoryTotal = typeof row.totalAmount === 'number' ? row.totalAmount : sections.reduce((s, sec) => s + (Number(sec.amount) || 0), 0);
+                            grandTotal += categoryTotal;
+                            return (
+                              <React.Fragment key={i}>
+                                {sections.length === 0 ? (
+                                  <tr className="border-b border-gray-200 text-gray-700 hover:bg-gray-50">
+                                    <td className="py-1 px-3 font-medium text-gray-800">{categoryName}</td>
+                                    <td className="py-1 px-3">—</td>
+                                    <td className="py-1 px-3 text-right font-semibold text-gray-900">
                                       {Number(categoryTotal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </td>
                                   </tr>
-                                </>
-                              )}
-                            </React.Fragment>
-                          );
-                        })}
-                      </tbody>
-                      <tfoot>
-                        <tr className="font-bold border-t-2 border-gray-400 text-gray-900 bg-gray-100">
-                          <td className="py-2 px-3" colSpan={2}>Grand Total</td>
-                          <td className="py-2 px-3 text-right">
-                            {Number(grandTotal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
+                                ) : (
+                                  <>
+                                    {sections.map((sec, j) => (
+                                      <tr key={`${i}-${j}`} className="border-b border-gray-200 text-gray-700 hover:bg-gray-50">
+                                        <td className="py-1 px-3 font-medium text-gray-800">{categoryName}</td>
+                                        <td className="py-1 px-3">{sec.sectionName ?? sec.sectionId ?? '—'}</td>
+                                        <td className="py-1 px-3 text-right font-semibold text-gray-900">
+                                          {typeof sec.amount === 'number' ? Number(sec.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : (sec.amount ?? '—')}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                    <tr className="bg-gray-100 border-b-2 border-gray-300 font-semibold text-gray-800">
+                                      <td className="py-2 px-3" colSpan={2}>Subtotal ({categoryName})</td>
+                                      <td className="py-2 px-3 text-right">
+                                        {Number(categoryTotal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </td>
+                                    </tr>
+                                  </>
+                                )}
+                              </React.Fragment>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr className="font-bold border-t-2 border-gray-400 text-gray-900 bg-gray-100">
+                            <td className="py-2 px-3" colSpan={2}>Grand Total</td>
+                            <td className="py-2 px-3 text-right">
+                              {Number(grandTotal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+
+                    {summaryData && (
+                      <div className="mt-8 border-t-2 border-gray-300 pt-0">
+                        <table className="w-full text-sm border-collapse border-t border-gray-200">
+                          <tbody>
+                            <tr className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
+                              <td className="py-2 px-4 text-gray-700 font-medium">Total</td>
+                              <td className="py-2 px-4 text-right text-gray-900 font-semibold">{Number(summaryData.GrossAmount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
+                              <td className="py-2 px-4 text-gray-700 font-medium">NoCash</td>
+                              <td className="py-2 px-4 text-right text-gray-900 font-semibold">{Number(summaryData.NoCash).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
+                              <td className="py-2 px-4 text-gray-700 font-medium">Discount</td>
+                              <td className="py-2 px-4 text-right text-red-600 font-semibold">{Number(summaryData.Discount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
+                              <td className="py-2 px-4 text-gray-700 font-medium">CGST</td>
+                              <td className="py-2 px-4 text-right text-gray-900 font-semibold">{Number(summaryData.CGST).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
+                              <td className="py-2 px-4 text-gray-700 font-medium">SGST</td>
+                              <td className="py-2 px-4 text-right text-gray-900 font-semibold">{Number(summaryData.SGST).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            </tr>
+                            <tr className="bg-gray-50 border-b border-gray-300">
+                              <td className="py-3 px-4 text-gray-900 font-bold text-base">Grand Total</td>
+                              <td className="py-3 px-4 text-right text-gray-900 font-black text-base">
+                                {Number(summaryData.NetAmount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
                 );
               })()}
             </ReportWrapper>
@@ -2477,36 +2472,11 @@ const Reports = () => {
                   </table>
                 </div>
               )}
-
-              {/* Sales Summary consolidated footer */}
-              {summaryData && (
-                <div className="mt-8 border-t-2 border-gray-300 pt-4 bg-gray-50 p-4 rounded-lg">
-                  <h4 className="text-md font-bold text-gray-800 mb-3 border-b pb-2">Consolidated Sales Summary</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <div className="flex justify-between items-center bg-white p-3 rounded border shadow-sm">
-                      <span className="text-gray-600 font-medium">Gross Amount</span>
-                      <span className="text-gray-900 font-bold">₹{Number(summaryData.GrossAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                    </div>
-                    <div className="flex justify-between items-center bg-white p-3 rounded border shadow-sm">
-                      <span className="text-gray-600 font-medium">Discount</span>
-                      <span className="text-gray-900 font-bold text-red-600">₹{Number(summaryData.Discount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                    </div>
-                    <div className="flex justify-between items-center bg-white p-3 rounded border shadow-sm">
-                      <span className="text-gray-600 font-medium">Tax (GST)</span>
-                      <span className="text-gray-900 font-bold">₹{Number(summaryData.SGST + summaryData.CGST).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                    </div>
-                    <div className="flex justify-between items-center bg-blue-50 p-3 rounded border border-blue-200 shadow-sm sm:col-span-2 lg:col-span-3">
-                      <span className="text-blue-800 font-bold uppercase tracking-wider">Net Payable</span>
-                      <span className="text-blue-900 font-black text-lg">₹{Number(summaryData.NetAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                    </div>
-                  </div>
-                </div>
-              )}
             </ReportWrapper>
           )}
         </div>
-      </main>
-    </div>
+      </main >
+    </div >
   );
 };
 

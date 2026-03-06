@@ -92,7 +92,7 @@ const Header = ({
             title="Chat on WhatsApp"
           >
             <Phone className="w-4 h-4" />
-            <span>WhatsApp Support</span>
+            <span>Contact for Support</span>
             <span className="font-semibold">9686067462</span>
           </div>
 

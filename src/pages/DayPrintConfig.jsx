@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, Printer, ArrowLeft, Loader2 } from 'lucide-react';
+import { Calendar, Printer, ArrowLeft, Loader2, X } from 'lucide-react';
 import Header from '../components/Header';
 import SettingsSidebar from '../components/SettingsSidebar';
-import { printReportConfig, getReportPreview } from '../services/apicall';
-import { PERMISSIONS, hasPermission } from '../components/permissions';
+import DayClosePopup from '../components/DayClosePopup';
+import { printReportConfig, getReportPreview,  } from '../services/apicall';
+import { PERMISSIONS, hasPermission, clearPermissions } from '../components/permissions';
 import SupervisorPasswordModal from '../components/SupervisorPasswordModal';
 
 const DayPrintConfig = () => {
@@ -17,6 +18,11 @@ const DayPrintConfig = () => {
     const [showSettings, setShowSettings] = useState(false);
     const [previewContent, setPreviewContent] = useState(null);
     const [previewLoading, setPreviewLoading] = useState(false);
+    const [showDayClosePopup, setShowDayClosePopup] = useState(false);
+
+    // Permission & Action States
+    const [pendingAction, setPendingAction] = useState(null); // 'preview', 'print', 'dayClose'
+    const [modalPermission, setModalPermission] = useState({ id: PERMISSIONS.DAY_REPORT_PRINT, name: 'Day Report Print' });
 
     // Cache: track the last previewed date range to avoid redundant calls
     const [lastPreviewedRange, setLastPreviewedRange] = useState({ from: null, to: null });
@@ -33,8 +39,25 @@ const DayPrintConfig = () => {
         };
     }, []);
 
-    // Show preview inside the same window using blob + iframe (original behavior)
-    const handleShowPreview = async () => {
+    // Unified Permission Handler
+    const handleActionWithPermission = (action, permId, permName) => {
+        if (hasPermission(permId)) {
+            performAction(action);
+        } else {
+            setPendingAction(action);
+            setModalPermission({ id: permId, name: permName });
+            setShowSupervisorModal(true);
+        }
+    };
+
+    const performAction = (action) => {
+        if (action === 'preview') executePreview();
+        if (action === 'print') executePrint();
+        if (action === 'dayClose') executeDayClose();
+    };
+
+    // Show preview logic
+    const executePreview = async () => {
         // Skip API call if same date range already loaded (client-side cache)
         if (lastPreviewedRange.from === fromDate && lastPreviewedRange.to === toDate && previewContent) {
             showToast('Already showing preview for this date range', 'info');
@@ -60,15 +83,6 @@ const DayPrintConfig = () => {
 
     const handleSettings = () => setShowSettings(!showSettings);
 
-    const handlePrintClick = () => {
-        if (hasPermission(PERMISSIONS.DAY_REPORT_PRINT)) {
-            executePrint();
-        } else {
-            setShowSupervisorModal(true);
-        }
-    };
-
-    // ✅ FIX 1 applied here too: send date-only strings for print
     const executePrint = async () => {
         setLoading(true);
         try {
@@ -82,9 +96,44 @@ const DayPrintConfig = () => {
         }
     };
 
+    const executeDayClose = () => {
+        setShowDayClosePopup(true);
+    };
+
+    const handleLogout = () => {
+        // Clear permissions on logout
+        clearPermissions();
+
+        localStorage.removeItem('isLoggedIn');
+        localStorage.removeItem('user');
+        localStorage.removeItem('loginTime');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('subscriberId');
+        localStorage.removeItem('restaurantName');
+        localStorage.removeItem('userName');
+        sessionStorage.clear();
+
+        showToast('Logged out successfully', 'success');
+        setTimeout(() => {
+            navigate('/login', { replace: true });
+        }, 1000);
+    };
+
+    const confirmDayClose = () => {
+        setShowDayClosePopup(false);
+        handleLogout();
+    };
+
+    const cancelDayClose = () => {
+        setShowDayClosePopup(false);
+    };
+
     const handleSupervisorSuccess = () => {
         setShowSupervisorModal(false);
-        executePrint();
+        if (pendingAction) {
+            performAction(pendingAction);
+            setPendingAction(null);
+        }
     };
 
     // Reset preview when date changes so user knows to click Preview again
@@ -106,11 +155,10 @@ const DayPrintConfig = () => {
 
             {/* TOAST NOTIFICATION */}
             {toast.show && (
-                <div className={`fixed top-4 right-4 z-[100] px-6 py-3 rounded shadow-lg transition-all duration-300 flex items-center gap-2 ${
-                    toast.type === 'success' ? 'bg-green-600 text-white' :
+                <div className={`fixed top-4 right-4 z-[100] px-6 py-3 rounded shadow-lg transition-all duration-300 flex items-center gap-2 ${toast.type === 'success' ? 'bg-green-600 text-white' :
                     toast.type === 'error' ? 'bg-red-600 text-white' :
-                    'bg-blue-600 text-white'
-                }`}>
+                        'bg-blue-600 text-white'
+                    }`}>
                     <span className="font-semibold text-sm">{toast.message}</span>
                 </div>
             )}
@@ -159,7 +207,7 @@ const DayPrintConfig = () => {
 
                         <div className="flex items-center gap-2">
                             <button
-                                onClick={handleShowPreview}
+                                onClick={() => handleActionWithPermission('preview', PERMISSIONS.DAY_REPORT_PRINT, 'Day Report Print')}
                                 disabled={previewLoading}
                                 className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded shadow-sm font-bold text-xs flex items-center gap-2 disabled:opacity-50 transition-all active:scale-95"
                             >
@@ -167,12 +215,20 @@ const DayPrintConfig = () => {
                                 <span>Preview</span>
                             </button>
                             <button
-                                onClick={handlePrintClick}
+                                onClick={() => handleActionWithPermission('print', PERMISSIONS.DAY_REPORT_PRINT, 'Day Report Print')}
                                 disabled={loading}
                                 className="bg-gray-800 hover:bg-gray-900 text-white px-4 py-1.5 rounded shadow-sm font-bold text-xs flex items-center gap-2 disabled:opacity-50 transition-all active:scale-95"
                             >
-                                {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Printer className="w-3.5 h-3.5" />}
+                                {loading && pendingAction === 'print' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Printer className="w-3.5 h-3.5" />}
                                 <span>Print</span>
+                            </button>
+                            <button
+                                onClick={() => handleActionWithPermission('dayClose', PERMISSIONS.DAY_CLOSE, 'Day Close')}
+                                disabled={loading}
+                                className="bg-red-600 hover:bg-red-700 text-white px-4 py-1.5 rounded shadow-sm font-bold text-xs flex items-center gap-2 disabled:opacity-50 transition-all active:scale-95"
+                            >
+                                {loading && pendingAction === 'dayClose' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+                                <span>Day Close</span>
                             </button>
                         </div>
                     </div>
@@ -180,38 +236,39 @@ const DayPrintConfig = () => {
 
                 {/* FULL SCREEN PREVIEW SECTION */}
                 <div className="flex-1 bg-white rounded shadow-md overflow-hidden flex flex-col border border-gray-200">
-                    <div className="px-4 py-2.5 bg-gray-50 border-b flex justify-between items-center">
-                        <h2 className="text-xs font-black text-gray-600 uppercase tracking-widest flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
-                            System Live Report Preview
-                        </h2>
-                    </div>
 
-                    <div className="flex-1 bg-gray-300 flex flex-col relative">
-                        {previewLoading ? (
-                            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center space-y-4 bg-white/80 backdrop-blur-sm">
-                                <div className="p-4 bg-blue-50 rounded-full">
-                                    <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+
+                    <div className="flex-1 flex flex-row bg-white">
+                        {/* Left Side: Empty Space */}
+                        <div className="flex-1 hidden lg:block bg-white"></div>
+
+                        {/* Right Side: Report Preview (50% Width) */}
+                        <div className="flex-1 bg-white flex flex-col relative border-l border-gray-400 shadow-2xl">
+                            {previewLoading ? (
+                                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center space-y-4 bg-white/80 backdrop-blur-sm">
+                                    <div className="p-4 bg-blue-50 rounded-full">
+                                        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                                    </div>
+                                    <p className="text-sm font-bold text-gray-700 animate-pulse">Generating high-resolution report...</p>
                                 </div>
-                                <p className="text-sm font-bold text-gray-700 animate-pulse">Generating high-resolution report...</p>
-                            </div>
-                        ) : previewContent ? (
-                            <iframe
-                                src={previewContent}
-                                className="absolute inset-0 w-full h-full border-none"
-                                title="Report Preview"
-                            />
-                        ) : (
-                            <div className="h-full flex flex-col items-center justify-center text-center p-12">
-                                <div className="p-6 bg-white rounded-full shadow-sm mb-6 border border-gray-100">
-                                    <Printer className="w-12 h-12 text-gray-200" />
+                            ) : previewContent ? (
+                                <iframe
+                                    src={`${previewContent}#navpanes=0&view=FitH`}
+                                    className="absolute inset-0 w-full h-full border-none bg-white"
+                                    title="Report Preview"
+                                />
+                            ) : (
+                                <div className="h-full flex flex-col items-center justify-center text-center p-12">
+                                    <div className="p-6 bg-white rounded-full shadow-sm mb-6 border border-gray-100">
+                                        <Printer className="w-12 h-12 text-gray-200" />
+                                    </div>
+                                    <h3 className="text-xl font-bold text-gray-400">Ready to Load Preview</h3>
+                                    <p className="text-sm text-gray-400 mt-2 max-w-sm">
+                                        Configure your date range above and click <b>Preview</b> to visualize the report content.
+                                    </p>
                                 </div>
-                                <h3 className="text-xl font-bold text-gray-400">Ready to Load Preview</h3>
-                                <p className="text-sm text-gray-400 mt-2 max-w-sm">
-                                    Configure your date range above and click <b>Preview</b> to visualize the report content.
-                                </p>
-                            </div>
-                        )}
+                            )}
+                        </div>
                     </div>
                 </div>
             </main>
@@ -220,7 +277,14 @@ const DayPrintConfig = () => {
                 isOpen={showSupervisorModal}
                 onClose={() => setShowSupervisorModal(false)}
                 onSuccess={handleSupervisorSuccess}
-                permissionName="Day Report Print"
+                permissionId={modalPermission.id}
+                permissionName={modalPermission.name}
+            />
+
+            <DayClosePopup
+                isOpen={showDayClosePopup}
+                onConfirm={confirmDayClose}
+                onCancel={cancelDayClose}
             />
 
             <SettingsSidebar
