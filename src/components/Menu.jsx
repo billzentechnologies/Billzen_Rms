@@ -14,6 +14,8 @@ const Menu = ({
   setSelectedSubCategory,
   selectedTable,
   numPersons,
+  selectedItems = [],
+  showToast,
 }) => {
   const searchInputRef = React.useRef(null);
   const dropdownRef = useRef(null);
@@ -166,6 +168,20 @@ const Menu = ({
 
     // ✅ Check if this is a customizable/open item
     if (item.Customize === true || item.customize === true) {
+      const existingCartItem = selectedItems.find(cartItem => 
+        (cartItem.itemId === itemId || cartItem.openItemid === itemId) && !cartItem.isVoided
+      );
+
+      if (existingCartItem) {
+        console.log("🎨 Item already in cart, showing warning:", itemName);
+        if (showToast) {
+          showToast(`"${itemName}" is already added. You can only customize it once per order.`, 'error');
+        } else {
+          alert(`"${itemName}" is already added. You can only customize it once per order.`);
+        }
+        return;
+      }
+
       console.log("🎨 Opening customize modal for:", itemName);
       setCustomizeItem(item);
       setShowCustomizeModal(true);
@@ -337,7 +353,11 @@ const Menu = ({
     ? items
       .filter(item => {
         const itemName = item.itemName || item.item_name || item.name || item.title || '';
-        return item.isActive !== false && itemName.toLowerCase().includes(searchQuery.toLowerCase());
+        const barcode = item.barCode || item.barcode || '';
+        return item.isActive !== false && (
+          itemName.toLowerCase().includes(searchQuery.toLowerCase()) || 
+          barcode.toLowerCase().includes(searchQuery.toLowerCase())
+        );
       })
       .slice(0, 10)
     : [];
@@ -375,7 +395,10 @@ const Menu = ({
   // ✅ UPDATED: Search across all items when searchQuery is present, ignore subcategory filter
   const filteredMenuItems = items.filter(item => {
     const itemName = item.itemName || item.item_name || item.name || item.title || '';
-    const matchesSearch = !searchQuery || itemName.toLowerCase().includes(searchQuery.toLowerCase());
+    const barcode = item.barCode || item.barcode || '';
+    const matchesSearch = !searchQuery || 
+      itemName.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      barcode.toLowerCase().includes(searchQuery.toLowerCase());
     const isActive = item.isActive !== false;
 
     // ✅ If there's a search query, ignore category filter and search all items
@@ -457,6 +480,7 @@ const Menu = ({
               <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-y-auto">
                 {searchResults.map((item, idx) => {
                   const itemName = item.itemName || item.item_name || item.name || item.title || 'Item';
+                  const barcode = item.barCode || item.barcode || '';
                   const { price: itemPrice } = getSectionPriceAndTax(item);
                   return (
                     <div
@@ -468,7 +492,14 @@ const Menu = ({
                       onMouseEnter={() => setHighlightedIndex(idx)}
                       onMouseDown={(e) => { e.preventDefault(); handleDropdownSelect(item); }}
                     >
-                      <span className="font-medium truncate flex-1 pr-4">{itemName}</span>
+                      <div className="flex flex-col flex-1 truncate pr-4">
+                        <span className="font-medium truncate">{itemName}</span>
+                        {barcode && (
+                          <span className="text-[10px] text-gray-500 font-mono mt-0.5" title="Barcode">
+                            {barcode}
+                          </span>
+                        )}
+                      </div>
                       <span className="text-green-600 font-bold shrink-0">₹{itemPrice.toFixed(2)}</span>
                     </div>
                   );

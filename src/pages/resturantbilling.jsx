@@ -31,6 +31,7 @@ export default function RestaurantBilling() {
   const [activeTab, setActiveTab] = useState('Take Away');
   const [existingOrderId, setExistingOrderId] = useState(null);
   const [discount, setDiscount] = useState(0);
+  const [categoryDiscounts, setCategoryDiscounts] = useState({});
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showDayClosePopup, setShowDayClosePopup] = useState(false);
@@ -457,6 +458,8 @@ export default function RestaurantBilling() {
             setActiveTab={setActiveTab}
             selectedTable={selectedTable}
             numPersons={numPersons}
+            selectedItems={selectedItems}
+            showToast={showToast}
           />
 
           <Cart
@@ -481,6 +484,8 @@ export default function RestaurantBilling() {
             salesDateISO={salesDateISO}
             discount={discount}
             setDiscount={setDiscount}
+            categoryDiscounts={categoryDiscounts}
+            setCategoryDiscounts={setCategoryDiscounts}
           />
         </div>
       </div>
@@ -528,11 +533,14 @@ export default function RestaurantBilling() {
         salesDateISO={salesDateISO}
         discount={discount}
         setDiscount={setDiscount}
+        categoryDiscounts={categoryDiscounts}
+        setCategoryDiscounts={setCategoryDiscounts}
         onPaymentComplete={() => {
           setSelectedItems([]);
           setSentItems([]);
           setExistingOrderId(null);
           setDiscount(0);
+          setCategoryDiscounts({});
           setSelectedTable(null);
           setNumPersons(null);
           setActiveTab('Take Away');

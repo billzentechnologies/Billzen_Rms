@@ -31,7 +31,9 @@ const Cart = ({
   setSentItems,
   salesDateISO,
   discount,
-  setDiscount
+  setDiscount,
+  categoryDiscounts = {},
+  setCategoryDiscounts = () => { }
 }) => {
   const cartRef = useRef(null);
   const navigate = useNavigate();
@@ -644,8 +646,8 @@ const Cart = ({
         itemId: itemId,
         itemPrice: item.price,
         itemQty: item.quantity,
-        itemDisc: item.discount || 0,
-        discType: item.discType || "None",
+        itemDisc: 0,
+        discType: (categoryDiscounts[item.categoryId || item.subcategoryId || 0] > 0) ? "Category" : (item.discType || "None"),
         itemname: item.name,
         ModifierItem: item.modifierItem || 0,
         addDetails: item.description && item.description.trim() ? item.description.trim() : "",
@@ -701,6 +703,12 @@ const Cart = ({
           kotBy: user?.id || 0,
           posId: posId || 1,
           discAmt: billLevelDiscAmt,
+          categoryDiscounts: Object.keys(categoryDiscounts)
+            .filter(catId => categoryDiscounts[catId] > 0)
+            .map(catId => ({
+              categoryId: Number(catId),
+              discountPercentage: categoryDiscounts[catId]
+            })),
           orderItemsDetails: orderItemsDetails
         },
         orderstatus: 1
@@ -796,13 +804,22 @@ const Cart = ({
       const orderId = await saveOrUpdateOrder();
       const user = JSON.parse(localStorage.getItem("user"));
 
+      const categoryDiscountsList = Object.keys(categoryDiscounts)
+        .filter(catId => categoryDiscounts[catId] > 0)
+        .map(catId => ({
+          categoryId: Number(catId),
+          discountPercentage: categoryDiscounts[catId]
+        }));
+
+      const hasCategoryDiscounts = categoryDiscountsList.length > 0;
+
       const checkPrintPayload = {
         CheckPrintRequest: {
-          OrderId: orderId,
+          OrderId: Number(orderId),
           staffId: user?.id || 12,
           printType: 0,
-          discountPercentage: Number(discount) || 0,
-          subCategoryDiscounts: []
+          discountPercentage: hasCategoryDiscounts ? 0 : (Number(discount) || 0),
+          categoryDiscounts: categoryDiscountsList
         }
       };
 
@@ -1056,6 +1073,12 @@ const Cart = ({
               kotBy: user?.id || 0,
               posId: posId || 1,
               discAmt: Number(discount) || 0,
+              categoryDiscounts: Object.keys(categoryDiscounts)
+                .filter(catId => categoryDiscounts[catId] > 0)
+                .map(catId => ({
+                  categoryId: Number(catId),
+                  discountPercentage: categoryDiscounts[catId]
+                })),
               orderItemsDetails: orderItemsDetails
             },
             orderstatus: 1
@@ -1511,6 +1534,8 @@ const Cart = ({
         setSentItems={setSentItems}
         voidedItems={voidedItems}
         setVoidedItems={setVoidedItems}
+        categoryDiscounts={categoryDiscounts}
+        setCategoryDiscounts={setCategoryDiscounts}
         onPaymentComplete={() => {
           setSelectedItems([]);
           setSentItems([]);

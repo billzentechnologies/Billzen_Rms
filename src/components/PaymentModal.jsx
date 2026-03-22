@@ -34,7 +34,9 @@ const PaymentModal = ({
   voidedItems = [],
   setVoidedItems = () => { },
   discount = 0,
-  setDiscount = () => { }
+  setDiscount = () => { },
+  categoryDiscounts = {},
+  setCategoryDiscounts = () => { }
 }) => {
   const navigate = useNavigate();
   const { executeWithPermission } = usePermission();
@@ -58,14 +60,12 @@ const PaymentModal = ({
   // Multi-pay data
   const [multiPayModes, setMultiPayModes] = useState(null);
 
-  // Category-wise discount state
-  const [categoryDiscounts, setCategoryDiscounts] = useState({});
-
   // Redesign UI states
-  const [viewMode, setViewMode] = useState('denominations'); // 'denominations' or 'discounts'
+  const [viewMode, setViewMode] = useState('denominations'); // 'denominations' | 'discounts' | 'categoryDiscount'
   const [enteredAmount, setEnteredAmount] = useState('');
   const [sidebarTab, setSidebarTab] = useState('itemWise'); // 'itemWise', 'category', 'billWise'
   const [selectedSidebarCategory, setSelectedSidebarCategory] = useState(null);
+  const [catDiscountInput, setCatDiscountInput] = useState('');
   const [allDiscounts, setAllDiscounts] = useState([]);
   const [discountsLoading, setDiscountsLoading] = useState(false);
 
@@ -247,15 +247,21 @@ const PaymentModal = ({
               setCategoryDiscounts(catDiscs);
             }
           } else if (response.OrderItemsDetails && Array.isArray(response.OrderItemsDetails)) {
-            // Priority 2: Fallback to deriving from items (backward compatibility)
+            // Priority 2: Fallback — derive percentage from itemDisc / itemPrice * 100
             const catDiscs = {};
             response.OrderItemsDetails.forEach(item => {
               const enrichedItem = selectedItems?.find(si => si.itemId === item.itemId);
               const catId = enrichedItem?.categoryId || item.categoryId || 0;
               const itemDisc = parseFloat(item.discount || item.itemDisc || 0);
+              const itemPrice = parseFloat(item.itemPrice || 0);
 
-              if (catId > 0 && itemDisc > 0) {
-                catDiscs[catId] = itemDisc;
+              // Only derive if we haven't stored a percentage for this category yet
+              // and the item has a valid price to compute percentage from
+              if (catId > 0 && itemDisc > 0 && itemPrice > 0 && !catDiscs[catId]) {
+                const derivedPct = Math.round((itemDisc / itemPrice) * 100);
+                if (derivedPct > 0 && derivedPct <= 100) {
+                  catDiscs[catId] = derivedPct;
+                }
               }
             });
 
@@ -275,7 +281,6 @@ const PaymentModal = ({
 
   useEffect(() => {
     if (isOpen) {
-      setIsProcessing(false);
       setTimeout(() => setIsVisible(true), 10);
       document.body.style.overflow = 'hidden';
     } else {
@@ -289,7 +294,6 @@ const PaymentModal = ({
       setShowCancelModal(false);
       setShowMultiPayModal(false);
       setMultiPayModes(null);
-      setCategoryDiscounts({});
       setApiOrderDiscAmt(0);
       document.body.style.overflow = 'unset';
       setIsProcessing(false);
@@ -310,12 +314,17 @@ const PaymentModal = ({
     );
 
     const individualItemDiscount = selectedItems.reduce((sum, item) => {
+      if (item.isVoided) return sum;
       const catId = item.categoryId || item.subcategoryId || 0;
-      const catDiscPercent = categoryDiscounts[catId] || 0;
+      // Use loose equality lookup for robustness against string/number keys
+      const catKey = Object.keys(categoryDiscounts).find(k => k == catId && k != "undefined" && k != "null");
+      const catDiscPercent = (catKey && categoryDiscounts[catKey]) ? parseFloat(categoryDiscounts[catKey]) : 0;
 
       if (catDiscPercent > 0) {
+        const itemDiscValue = (item.price * item.quantity * (catDiscPercent / 100));
+        console.log(`🏷️ Applying ${catDiscPercent}% category discount (₹${itemDiscValue.toFixed(2)}) to item: ${item.name} (Cat ${catId})`);
         // Use category discount for this item
-        return sum + (item.price * item.quantity * (catDiscPercent / 100));
+        return sum + itemDiscValue;
       }
       // Use standard item-level discount
       return sum + ((item.discount || 0) * item.quantity);
@@ -353,7 +362,8 @@ const PaymentModal = ({
 
       const itemBasePrice = item.price * item.quantity;
       const catId = item.categoryId || item.subcategoryId || 0;
-      const catDiscPercent = categoryDiscounts[catId] || 0;
+      const catKey = Object.keys(categoryDiscounts).find(k => k == catId && k != "undefined" && k != "null");
+      const catDiscPercent = (catKey && categoryDiscounts[catKey]) ? parseFloat(categoryDiscounts[catKey]) : 0;
 
       const itemIndividualDiscount = catDiscPercent > 0
         ? (itemBasePrice * catDiscPercent / 100)
@@ -422,6 +432,15 @@ const PaymentModal = ({
     const grandTotalBeforeRound = priceAfterDiscount + totalTaxAmount;
     const roundOff = Math.round(grandTotalBeforeRound) - grandTotalBeforeRound;
     const grandTotal = Math.round(grandTotalBeforeRound);
+
+    console.log('📊 Bill Totals Calculated:', {
+      subTotal,
+      individualItemDiscount,
+      billLevelDiscount,
+      totalItemDiscount,
+      grandTotal,
+      roundOff
+    });
 
     return {
       subTotal: parseFloat(subTotal.toFixed(2)),
@@ -830,7 +849,18 @@ const PaymentModal = ({
   };
 
   const handleApplyDiscount = (discount) => {
-    // 🔐 Check DISCOUNT permission
+    if (viewMode === 'categoryDiscount' && selectedSidebarCategory !== null) {
+      const pct = discount?.discountPercentage || 0;
+      if (pct >= 0 && pct <= 100) {
+        setCategoryDiscounts(prev => ({ ...prev, [selectedSidebarCategory]: pct }));
+        showToast(`Applied ${pct}% discount to category`, 'success');
+      } else {
+        showToast('Invalid discount percentage', 'error');
+      }
+      return;
+    }
+
+    // Default bill-level discount logic
     setDiscount(discount?.discountPercentage || 0);
     setSelectedDiscount(discount);
     // ✅ Clear API-level flat discount when a manual/predefined one is selected or cleared
@@ -1166,8 +1196,16 @@ const PaymentModal = ({
 
       const items = uniqueItems.map((item, index) => {
         const basePrice = item.price * item.quantity;
-        const itemDiscount = (item.discount || 0) * item.quantity;
-        const priceAfterDiscount = basePrice - itemDiscount;
+
+        // Calculate the core discount for this item (either category or standard item-level)
+        const catId = item.categoryId || item.subcategoryId || 0;
+        const catDiscPercent = categoryDiscounts[catId] || 0;
+
+        const effectiveItemDiscount = catDiscPercent > 0
+          ? (basePrice * (catDiscPercent / 100))
+          : ((item.discount || 0) * item.quantity);
+
+        const priceAfterDiscount = basePrice - effectiveItemDiscount;
 
         let itemGstTotal = 0;
         let totalTaxRate = 0;
@@ -1190,66 +1228,77 @@ const PaymentModal = ({
         return {
           item_barcode: item.barcode || `ITEM${String(index + 1).padStart(3, '0')}`,
           id: getPureItemId(item),
+          variantId: item.variantId || 0,
           item_name: item.name,
           item_unit: item.unit || "Plate",
           item_quantity: item.quantity,
           item_rate: item.price,
           base_price: basePrice,
-          item_discount: itemDiscount,
-          price_after_discount: priceAfterDiscount,
+          item_discount: parseFloat(effectiveItemDiscount.toFixed(2)),
+          price_after_discount: parseFloat(priceAfterDiscount.toFixed(2)),
           item_gst_rate: totalTaxRate,
           item_gst_total: parseFloat(itemGstTotal.toFixed(2)),
-          price_after_gst: parseFloat(priceAfterGst.toFixed(2)),
-          item_description: item.description || "",
-          addDetails: item.description || ""
+          price_after_gst: parseFloat(priceAfterGst.toFixed(2))
         };
+      });
+
+      // Calculate Category Discount Summary
+      const categoryDiscountSummary = [];
+      const categoryMap = new Map();
+
+      finalItems.forEach(item => {
+        if (item.isVoided) return;
+        const catId = item.categoryId || 0;
+        const catName = item.categoryName || (catId !== 0 ? `Category ${catId}` : 'General');
+        if (!categoryMap.has(catId)) {
+          categoryMap.set(catId, { id: catId, name: catName, items: [] });
+        }
+        categoryMap.get(catId).items.push(item);
+      });
+
+      categoryMap.forEach((data, catId) => {
+        const percent = categoryDiscounts[catId] || 0;
+        if (percent > 0) {
+          const catGross = data.items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+          categoryDiscountSummary.push({
+            categoryId: catId,
+            categoryName: data.name,
+            discountPercentage: percent,
+            discountAmount: parseFloat((catGross * percent / 100).toFixed(2))
+          });
+        }
       });
 
       const paymentSummary = {
         subTotal: totals.subTotal,
         itemDiscount: totals.itemDiscount,
-        billLevelDiscount: totals.billLevelDiscount,
-        discountPercentage: totals.discountPercentage,
         operatorDiscount: 0,
         taxBreakdown: totals.taxBreakdown,
         totalTaxAmount: totals.totalTaxAmount,
         cgstTotal: totals.cgstTotal,
         sgstTotal: totals.sgstTotal,
-        serviceCharge: totals.serviceCharge,
+        serviceCharge: 0,
         roundOff: totals.roundOff,
         grandTotal: totals.grandTotal
       };
-
-      if (selectedDiscount) {
-        paymentSummary.discountDetails = {
-          discountId: selectedDiscount.discountId,
-          discountName: selectedDiscount.discountName,
-          discountPercentage: selectedDiscount.discountPercentage,
-          discountAmount: totals.billLevelDiscount
-        };
-      }
 
       const billPayload = {
         customer_id: customerDetails ? 1 : 0,
         customer_name: customerDetails?.name || "",
         customer_mobile: customerDetails?.mobile || "",
-        customer_address: customerDetails?.address || "",
-        customer_email: customerDetails?.email || "",
         outlet_id: 1,
         counter_id: posId || 1,
         orderId: orderId,
         staffId: user?.id || 12,
-        transactionType: transactionTypeId,
-
-        sectionTable: tableDetails.sectionTable,
-        chairNo: tableDetails.chairNo,
-        PAX: tableDetails.PAX,
-
         date_of_sale: salesDateISO || localStorage.getItem('salesDate') || new Date().toISOString(),
         is_credit_bill: false,
         payment_summary: paymentSummary,
-        paymentModes: paymentModesArray,
-        items: items
+        paymentModes: paymentModesArray.map(pm => ({
+          PaymentType: pm.PaymentType,
+          Amount: pm.Amount
+        })),
+        items: items,
+        categoryDiscountSummary: categoryDiscountSummary
       };
 
       console.log("📤 Sending bill payload:", billPayload);
@@ -1287,6 +1336,24 @@ const PaymentModal = ({
     setShowDiscountModal(true);
   };
 
+  const fetchDiscountsNow = async () => {
+    try {
+      setDiscountsLoading(true);
+      const { getDiscounts } = await import('../services/apicall');
+      const response = await getDiscounts();
+      const discountsData = Array.isArray(response) ? response : (response?.data || []);
+      const activeDiscounts = discountsData.filter(d =>
+        (d.isactive === true || d.isActive === true || d.status === 1) &&
+        (parseFloat(d.discountPercentage) > 0)
+      );
+      setAllDiscounts(activeDiscounts);
+    } catch (error) {
+      console.error('Failed to fetch discounts:', error);
+    } finally {
+      setDiscountsLoading(false);
+    }
+  };
+
   const handleDiscountToggle = () => {
     executeWithPermission(PERMISSIONS.DISCOUNT, 'Discount', () => {
       const nextMode = viewMode === 'discounts' ? 'denominations' : 'discounts';
@@ -1294,23 +1361,6 @@ const PaymentModal = ({
 
       // Lazily fetch discounts only when opening discount view and not yet loaded
       if (nextMode === 'discounts' && allDiscounts.length === 0) {
-        const fetchDiscountsNow = async () => {
-          try {
-            setDiscountsLoading(true);
-            const { getDiscounts } = await import('../services/apicall');
-            const response = await getDiscounts();
-            const discountsData = Array.isArray(response) ? response : (response?.data || []);
-            const activeDiscounts = discountsData.filter(d =>
-              (d.isactive === true || d.isActive === true || d.status === 1) &&
-              (parseFloat(d.discountPercentage) > 0)
-            );
-            setAllDiscounts(activeDiscounts);
-          } catch (error) {
-            console.error('Failed to fetch discounts:', error);
-          } finally {
-            setDiscountsLoading(false);
-          }
-        };
         fetchDiscountsNow();
       }
     });
@@ -1323,7 +1373,7 @@ const PaymentModal = ({
         delete updated[selectedSidebarCategory];
         return updated;
       });
-      showToast(`Cleared discount for category`, 'info');
+      // showToast(`Cleared discount for category`, 'info');
     } else {
       handleApplyDiscount(null);
       showToast(`Cleared bill discount`, 'info');
@@ -1395,25 +1445,79 @@ const PaymentModal = ({
             {/* Left Sidebar: Summary & Total Breakdown */}
             <div className="w-[30%] max-w-[400px] bg-white border-r flex flex-col shadow-sm">
               <div className="p-4 border-b flex justify-between items-center">
-                <h2 className="text-xl font-bold text-gray-800">Summary</h2>
+                <h2 className="text-xl font-bold text-gray-800">
+                  {viewMode === 'categoryDiscount' ? 'Categories' : 'Summary'}
+                </h2>
                 <div className="text-sm font-bold text-red-500">
                   Bill No: <span className="text-red-500">{billNumber || '-'}</span>
                 </div>
               </div>
 
-              {/* Scrollable Item List */}
+              {/* Scrollable Item List or Category List */}
               <div className="flex-1 overflow-y-auto">
-                <div className="divide-y">
-                  {selectedItems.map((item, idx) => (
-                    <div key={idx} className="p-2 flex items-center hover:bg-gray-50 transition-colors text-xs border-b">
-                      <div className="flex-1 text-gray-900 font-medium truncate pr-2" title={item.name}>{item.name}</div>
-                      <div className="w-12 text-center text-gray-900 text-xs font-medium">{item.quantity}</div>
-                      <div className="w-20 text-right text-gray-900 text-xs font-medium">
-                        {(item.price * item.quantity).toFixed(2)}
+                {viewMode === 'categoryDiscount' ? (
+                  /* Category-wise grouped view */
+                  <div className="divide-y">
+                    {(() => {
+                      const categoryMap = new Map();
+                      selectedItems.forEach(item => {
+                        if (item.isVoided) return;
+                        const catId = item.categoryId || item.subcategoryId || 0;
+                        const catName = item.categoryName || item.subCategoryName || (catId !== 0 ? `Category ${catId}` : 'General');
+                        if (!categoryMap.has(catId)) categoryMap.set(catId, { id: catId, name: catName, items: [] });
+                        categoryMap.get(catId).items.push(item);
+                      });
+                      return Array.from(categoryMap.values()).map(cat => {
+                        const catTotal = cat.items.reduce((s, i) => s + i.price * i.quantity, 0);
+                        const catKey = Object.keys(categoryDiscounts).find(k => k == cat.id);
+                        const existingDisc = catKey ? categoryDiscounts[catKey] : 0;
+                        const isSelected = selectedSidebarCategory != null && selectedSidebarCategory == cat.id;
+                        return (
+                          <div
+                            key={cat.id}
+                            onClick={() => { setSelectedSidebarCategory(cat.id); setCatDiscountInput(existingDisc > 0 ? String(existingDisc) : ''); }}
+                            className={`p-3 cursor-pointer transition-colors ${isSelected ? 'bg-[#d1f2f2]' : 'hover:bg-gray-50'
+                              }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-gray-800 text-sm">{cat.name}</span>
+                              {existingDisc > 0 && (
+                                <span className="text-xs font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">{existingDisc}% off</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-0.5">
+                              {cat.items.length} item(s) · ₹{catTotal.toFixed(2)}
+                            </div>
+                            <div className="text-[11px] text-gray-900 mt-1 space-y-1.5 border-t pt-1.5">
+                              {cat.items.map((it, i) => (
+                                <div key={i} className="flex justify-between items-center">
+                                  <span className="truncate pr-2 font-medium uppercase">{it.name}</span>
+                                  <div className="flex gap-4 items-center">
+                                    <span className="w-4 text-center">{it.quantity}</span>
+                                    <span className="w-16 text-right font-medium">{(it.price * it.quantity).toFixed(2)}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+                ) : (
+                  /* Normal flat item list */
+                  <div className="divide-y">
+                    {selectedItems.map((item, idx) => (
+                      <div key={idx} className="p-2 flex items-center hover:bg-gray-50 transition-colors text-xs border-b">
+                        <div className="flex-1 text-gray-900 font-medium truncate pr-2" title={item.name}>{item.name}</div>
+                        <div className="w-12 text-center text-gray-900 text-xs font-medium">{item.quantity}</div>
+                        <div className="w-20 text-right text-gray-900 text-xs font-medium">
+                          {(item.price * item.quantity).toFixed(2)}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Sidebar Footer: Detailed breakdown */}
@@ -1499,9 +1603,9 @@ const PaymentModal = ({
 
               {/* Header Tabs */}
               <div className="flex justify-between items-center mb-4">
-                <div className="flex items-center gap-4 text-sm font-semibold">
+                <div className="flex items-center gap-3 text-sm font-semibold flex-wrap">
                   <button
-                    onClick={() => setViewMode('denominations')}
+                    onClick={() => { setViewMode('denominations'); setSelectedSidebarCategory(null); }}
                     className={`px-3 py-1 rounded transition-colors font-bold ${viewMode === 'denominations' ? 'bg-[#d1f2f2] text-gray-900' : 'text-gray-900 hover:text-black'}`}
                   >
                     Tender
@@ -1512,6 +1616,18 @@ const PaymentModal = ({
                     className={`px-3 py-1 rounded transition-colors font-bold ${viewMode === 'discounts' ? 'bg-[#d1f2f2] text-gray-900' : 'text-gray-900 hover:text-black'}`}
                   >
                     Discount
+                  </button>
+                  <div className="w-[1px] h-4 bg-gray-300"></div>
+                  <button
+                    onClick={() => {
+                      setViewMode('categoryDiscount');
+                      setSelectedSidebarCategory(null);
+                      setCatDiscountInput('');
+                      if (allDiscounts.length === 0) fetchDiscountsNow();
+                    }}
+                    className={`px-3 py-1 rounded transition-colors font-bold ${viewMode === 'categoryDiscount' ? 'bg-[#d1f2f2] text-gray-900' : 'text-gray-900 hover:text-black'}`}
+                  >
+                    Cat. Discount
                   </button>
                   <div className="w-[1px] h-4 bg-gray-300"></div>
                   <button
@@ -1589,6 +1705,80 @@ const PaymentModal = ({
                       </div>
                     </div>
                   </div>
+                ) : viewMode === 'categoryDiscount' ? (
+                  <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+                    {/* Category Discount Tab */}
+                    <div className="space-y-2">
+                      <h2 className="text-lg font-bold text-gray-800">Category Discount Selection</h2>
+                      <div className="bg-white border rounded-xl p-4 shadow-sm">
+                        {selectedSidebarCategory !== null ? (
+                          <>
+                            <p className="text-sm text-gray-600 mb-3">
+                              Select a discount for <strong>
+                                {(() => {
+                                  const item = selectedItems.find(i => (i.categoryId || 0) === selectedSidebarCategory);
+                                  return item?.categoryName || `Category ${selectedSidebarCategory}`;
+                                })()}
+                              </strong>:
+                            </p>
+
+                            <div className="flex flex-wrap gap-2 mb-4">
+                              {allDiscounts.map(disc => (
+                                <button
+                                  key={disc.discountId}
+                                  onClick={() => handleApplyDiscount(disc)}
+                                  className="w-24 h-24 bg-[#d1f2f2] border-2 border-[#b5e6e6] rounded-lg flex flex-col items-center justify-center gap-1 hover:bg-[#b5e6e6] transition-all p-2 text-center"
+                                >
+                                  <span className="text-xs font-bold text-gray-900 leading-tight line-clamp-3">
+                                    {disc.discountName || disc.discountCategory || `${disc.discountPercentage}%`}
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+
+                            <div className="flex justify-end border-t pt-3">
+                              <button
+                                onClick={() => {
+                                  setCategoryDiscounts(prev => { const u = { ...prev }; delete u[selectedSidebarCategory]; return u; });
+                                  showToast('Category discount cleared', 'info');
+                                }}
+                                className="px-4 py-2 bg-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-300 transition-colors"
+                              >
+                                Clear Category Discount
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-center py-8 text-gray-500">
+                            <p className="text-4xl mb-3">👈</p>
+                            <p className="font-bold text-gray-700">Select a category from the left panel</p>
+                            <p className="text-xs mt-1">Then enter the discount % to apply</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Summary of applied category discounts */}
+                      {Object.keys(categoryDiscounts).some(k => categoryDiscounts[k] > 0) && (
+                        <div className="mt-4 pt-4 border-t bg-gray-50 rounded-lg p-3">
+                          <p className="text-sm font-bold text-gray-800 mb-3 uppercase tracking-wider">Applied Category Discounts:</p>
+                          <div className="space-y-2">
+                            {Object.entries(categoryDiscounts).map(([catId, pct]) => {
+                              if (pct <= 0) return null;
+                              // Match cat.id or catId as accurately as possible (loose equality for robustness)
+                              const catItem = selectedItems.find(i => (i.categoryId || 0) == catId || (i.subcategoryId || 0) == catId);
+                              const catName = catItem?.categoryName || catItem?.subCategoryName || `Category ${catId}`;
+                              return (
+                                <div key={catId} className="flex justify-between items-center text-sm bg-white p-2 rounded border shadow-sm">
+                                  <span className="text-gray-700 font-bold">{catName}</span>
+                                  <span className="font-black text-green-600 bg-green-50 px-2 py-0.5 rounded">{pct}% off</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 ) : (
                   <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
                     {/* Discount Tab */}
@@ -1607,21 +1797,7 @@ const PaymentModal = ({
                               </span>
                             </button>
                           ))}
-                          {/* <button className="w-40 h-24 bg-[#d1f2f2] border-2 border-gray-400 rounded-lg flex flex-col items-center justify-center p-2 text-center leading-tight hover:bg-[#b5e6e6] transition-all">
-                            <span className="text-xs font-black text-gray-900">Customised Discount</span>
-                          </button> */}
                         </div>
-
-                        {/* <div className="flex items-center justify-end gap-3 pr-2 border-t pt-2">
-                          <label className="text-xs font-bold text-gray-800">Custom % Value:</label>
-                          <input
-                            type="text"
-                            className="w-24 p-1 border-2 rounded-lg text-right font-bold text-base"
-                          />
-                          <button className="px-4 py-1 bg-[#d1f2f2] border-gray-400 border text-gray-900 font-bold rounded shadow-sm hover:bg-[#b5e6e6] transition-colors text-sm">
-                            Apply
-                          </button>
-                        </div> */}
                       </div>
                     </div>
                   </div>

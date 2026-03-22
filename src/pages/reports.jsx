@@ -1026,6 +1026,7 @@ const Reports = () => {
                         <th className="py-2 px-3 bg-gray-100">Item</th>
                         <th className="py-2 px-3 bg-gray-100 text-right">Qty</th>
                         <th className="py-2 px-3 bg-gray-100 text-right">Gross</th>
+                        <th className="py-2 px-3 bg-gray-100 text-right">Net</th>
                       </tr>
                     </thead>
 
@@ -1041,6 +1042,7 @@ const Reports = () => {
                             <td className="py-1 px-3">{it.item_name}</td>
                             <td className="py-1 px-3 text-right">{Number(it.Quantity || 0).toLocaleString('en-IN')}</td>
                             <td className="py-1 px-3 text-right">{Number(it.GrossAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            <td className="py-1 px-3 text-right font-semibold">{Number(it.NetAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                           </tr>
                         ))}
 

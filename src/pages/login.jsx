@@ -83,14 +83,14 @@ const LoginPage = () => {
     setIsSubmitting(true);
 
     try {
-      const deviceInfo = getDeviceInfo();
+      const deviceInfo = await getDeviceInfo();
       console.log("Device Info:", deviceInfo);
 
       const data = await loginUser({
         username: formData.username,
         password: formData.password,
         device_id: deviceInfo.deviceId
-          // device_id: '52FBA27D-2E71-4C42-A04D-8FDF3BE24108' // Sending device id
+        // device_id: '69B0437E-AF58-4F23-8F68-30F207AEDDBE' // Sending device id
       });
 
       console.log("API Response:", data);
@@ -164,7 +164,7 @@ const LoginPage = () => {
       console.error("Login error:", error);
 
       // 💾 Save CRITICAL ERROR to physical file
-      const deviceInfo = getDeviceInfo();
+      const deviceInfo = await getDeviceInfo();
       saveLogToFile({
         userName: formData.username,
         deviceId: deviceInfo.deviceId,

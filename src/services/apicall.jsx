@@ -1,68 +1,55 @@
-import axios from "axios"; // Test comment
+import axios from "axios";
 
-// Default values (fallback if config.json fails to load)
-// let API_BASE = "http://DESKTOP-RBAK6HS/RestaurentAPI/api";
-// Default values (fallback if config.json fails to load)
+// ── Single source of truth: all values come from config.json ─────────────────
+// This fallback is used ONLY if config.json cannot be loaded at all.
 // let API_BASE = "http://localhost/RestaurentAPI/api";
-
-// let API_BASE = "http://devbillzen-001-site7.atempurl.com/api";
-// let API_BASE = "http://devbillzen-001-site29.ktempurl.com/api";
-
 let API_BASE = "http://localhost:44306/api";
-
-     
 let SUBSCRIBER_ID = "1";
 let ADMIN_PAGE_URL = "http://localhost:40/login";
 let KOT_REDIRECT_URL = "/tables";
 let configLoaded = false;
 
-// Load configuration from config.json at runtime
+// ── Load configuration from config.json at runtime ───────────────────────────
+// Priority:
+//   1. Electron IPC bridge (installed app / dev Electron) — reads the file via main process
+//   2. fetch('./config.json')                             — browser / React dev server fallback
 export const loadConfig = async () => {
   if (configLoaded) return;
 
-  // 1. Try to load from external config (for Electron builds)
-  // In Electron's renderer process with nodeIntegration: true
-  if (typeof window !== 'undefined' && window.process && window.process.type === 'renderer') {
-    try {
-      const fs = window.require('fs');
-      const path = window.require('path');
-      const resourcesPath = window.process.resourcesPath;
-      const externalConfigPath = path.join(resourcesPath, 'config.json');
-
-      if (fs.existsSync(externalConfigPath)) {
-        const data = fs.readFileSync(externalConfigPath, 'utf8');
-        const config = JSON.parse(data);
-
-        if (config.API_BASE_URL) API_BASE = config.API_BASE_URL;
-        if (config.SUBSCRIBER_ID) SUBSCRIBER_ID = config.SUBSCRIBER_ID.toString();
-        if (config.ADMIN_PAGE_URL) ADMIN_PAGE_URL = config.ADMIN_PAGE_URL;
-        if (config.KOT_REDIRECT_URL) KOT_REDIRECT_URL = config.KOT_REDIRECT_URL;
-
-        configLoaded = true;
-        console.log("✅ Config loaded from EXTERNAL file:", externalConfigPath);
-        return;
-      }
-    } catch (err) {
-      console.log("ℹ️ External config not found or not in Electron, falling back to fetch...");
-    }
-  }
-
-  // 2. Fallback for Dev mode / Browser
-  try {
-    const response = await fetch("./config.json?t=" + Date.now());
-    const config = await response.json();
-
+  const applyConfig = (config) => {
     if (config.API_BASE_URL) API_BASE = config.API_BASE_URL;
     if (config.SUBSCRIBER_ID) SUBSCRIBER_ID = config.SUBSCRIBER_ID.toString();
     if (config.ADMIN_PAGE_URL) ADMIN_PAGE_URL = config.ADMIN_PAGE_URL;
     if (config.KOT_REDIRECT_URL) KOT_REDIRECT_URL = config.KOT_REDIRECT_URL;
-
     configLoaded = true;
-    console.log("✅ Config loaded from relative path");
+  };
+
+  // 1. Try Electron IPC bridge (works even with contextIsolation: true)
+  if (window.electronAPI && window.electronAPI.loadConfig) {
+    try {
+      const result = await window.electronAPI.loadConfig();
+      if (result.success && result.config) {
+        applyConfig(result.config);
+        console.log("✅ Config loaded via Electron IPC from:", result.loadedFrom);
+        console.log("✅ API_BASE_URL =", result.config.API_BASE_URL);
+        return;
+      }
+    } catch (err) {
+      console.warn("⚠️ Electron IPC config load failed:", err.message);
+    }
+  }
+
+  // 2. Fallback: fetch from public/config.json (browser / React dev server)
+  try {
+    const response = await fetch("./config.json?t=" + Date.now());
+    const config = await response.json();
+    applyConfig(config);
+    console.log("✅ Config loaded via fetch:", config.API_BASE_URL);
   } catch (error) {
-    console.error("❌ Failed to load config.json, using defaults:", error);
+    console.error("❌ Failed to load config.json, using hardcoded fallback:", error);
   }
 };
+
 
 // Get current subscriber ID (exported for use in other files if needed)
 export const getSubscriberId = () => SUBSCRIBER_ID;
@@ -103,6 +90,14 @@ apiClient.interceptors.response.use(
   }
 );
 
+// Helper to log to terminal from React
+const remoteLog = (msg) => {
+  console.log(msg);
+  if (window.electronAPI && window.electronAPI.printLog) {
+    window.electronAPI.printLog(msg);
+  }
+};
+
 // ✅ UPDATED: Login API using dynamic SUBSCRIBER_ID
 export const loginUser = async (credentials) => {
   try {
@@ -114,6 +109,7 @@ export const loginUser = async (credentials) => {
     });
     return response.data;
   } catch (error) {
+    remoteLog(`❌ [REACT] Login Error: ${error?.message || "Unknown error"}`);
     throw error.response ? error.response.data : error;
   }
 };
