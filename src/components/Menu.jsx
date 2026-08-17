@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, X } from 'lucide-react';
-import { getItems, getSubCategories, getItemVariants } from '../services/apicall';
+import { getItems, getSubCategories, getItemVariants, getTransactionTypes } from '../services/apicall';
 import VariantPopup from './VariantPopup';
 import CustomizeItemModal from './CustomizeItemModal';
 
@@ -21,6 +21,7 @@ const Menu = ({
   const dropdownRef = useRef(null);
   const [items, setItems] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
+  const [transactionTypes, setTransactionTypes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -42,9 +43,10 @@ const Menu = ({
         setLoading(true);
         setError(null);
 
-        const [itemsResponse, subCategoriesResponse] = await Promise.all([
+        const [itemsResponse, subCategoriesResponse, transactionsResponse] = await Promise.all([
           getItems(),
-          getSubCategories()
+          getSubCategories(),
+          getTransactionTypes().catch(() => [])
         ]);
 
         const itemsData = Array.isArray(itemsResponse)
@@ -55,12 +57,17 @@ const Menu = ({
           ? subCategoriesResponse
           : subCategoriesResponse?.data || subCategoriesResponse || [];
 
+        const transactionsData = Array.isArray(transactionsResponse)
+          ? transactionsResponse
+          : transactionsResponse?.data || transactionsResponse || [];
+
         console.log("📦 RAW ITEMS API RESPONSE:", itemsResponse);
         console.log("🔍 FIRST ITEM STRUCTURE:", itemsData[0]);
         console.log("📍 SELECTED TABLE:", selectedTable);
 
         setItems(itemsData);
         setSubCategories(subCategoriesData);
+        setTransactionTypes(transactionsData);
 
       } catch (err) {
         console.error("❌ Failed to fetch menu data:", err);
@@ -87,21 +94,33 @@ const Menu = ({
   // Run only once on mount
 
   useEffect(() => {
-    const handleRefocus = () => {
+    const handleRefocus = (e) => {
       // Small delay to ensure DOM updates and focus transitions are complete
       setTimeout(() => {
-        if (searchInputRef.current) {
-          const activeElement = document.activeElement;
-          const isInputField =
-            activeElement.tagName === 'INPUT' ||
-            activeElement.tagName === 'TEXTAREA' ||
-            activeElement.isContentEditable;
+        if (!searchInputRef.current) return;
 
-          // Only refocus if we're not already in an input field
-          if (!isInputField) {
-            searchInputRef.current.focus();
-          }
+        const activeElement = document.activeElement;
+        const tagName = activeElement?.tagName;
+        const isEditableField =
+          tagName === 'INPUT' ||
+          tagName === 'TEXTAREA' ||
+          tagName === 'SELECT' ||
+          activeElement?.isContentEditable;
+
+        // Keep focus on other inputs/selects (cart qty, modifier dropdown, modals)
+        if (isEditableField && activeElement !== searchInputRef.current) {
+          return;
         }
+
+        // Don't steal focus from cart or elements that opt out
+        if (
+          activeElement?.closest?.('[data-pos-cart], [data-no-search-refocus]') ||
+          e?.target?.closest?.('[data-pos-cart], [data-no-search-refocus], [role="dialog"]')
+        ) {
+          return;
+        }
+
+        searchInputRef.current.focus();
       }, 100);
     };
 
@@ -121,6 +140,51 @@ const Menu = ({
       window.removeEventListener('keydown', handleRefocus);
     };
   }, [loading, activeTab]);
+
+  const getCurrentTransactionId = useCallback(() => {
+    const tab = (activeTab || '').toLowerCase().trim();
+    if (!tab) return null;
+    const match = (transactionTypes || []).find((t) => {
+      const name = (t.transactionName || t.TransactionName || '').toLowerCase().trim();
+      if (!name) return false;
+      if (name === tab) return true;
+      // common aliases
+      if (tab.includes('dine') && name.includes('dine')) return true;
+      if ((tab.includes('take') || tab.includes('away')) && (name.includes('take') || name.includes('away'))) return true;
+      if ((tab.includes('home') || tab.includes('delivery')) && (name.includes('home') || name.includes('delivery'))) return true;
+      return false;
+    });
+    return match ? Number(match.transactionId ?? match.TransactionId ?? 0) || null : null;
+  }, [activeTab, transactionTypes]);
+
+  const isItemVisibleForContext = useCallback((item) => {
+    if (!item || item.isActive === false) return false;
+
+    const tid = getCurrentTransactionId();
+    if (tid) {
+      const list = item.TransactionItems || item.transactionItems || [];
+      const row = list.find((t) => Number(t.transactionId ?? t.TransactionId) === tid);
+      if (row) {
+        const vis = row.isVisible !== undefined ? row.isVisible : row.IsVisible;
+        if (vis === false || vis === 0 || vis === 'false') return false;
+      }
+    }
+
+    // Section filter only when Dine In (or similar) with a table section
+    const tab = (activeTab || '').toLowerCase();
+    const isDineIn = tab.includes('dine') || Number(tid) === 1;
+    const sectionId = selectedTable?.sectionId ?? selectedTable?.SectionId;
+    if (isDineIn && sectionId) {
+      const rates = item.SectionItemRates || item.sectionItemRates || [];
+      const row = rates.find((s) => Number(s.sectionId ?? s.SectionId) === Number(sectionId));
+      if (row) {
+        const vis = row.isVisible !== undefined ? row.isVisible : row.IsVisible;
+        if (vis === false || vis === 0 || vis === 'false') return false;
+      }
+    }
+
+    return true;
+  }, [activeTab, getCurrentTransactionId, selectedTable]);
 
   const getSectionPriceAndTax = (item) => {
     const defaultPrice = item.salePrice || item.price || 0;
@@ -354,7 +418,7 @@ const Menu = ({
       .filter(item => {
         const itemName = item.itemName || item.item_name || item.name || item.title || '';
         const barcode = item.barCode || item.barcode || '';
-        return item.isActive !== false && (
+        return isItemVisibleForContext(item) && (
           itemName.toLowerCase().includes(searchQuery.toLowerCase()) || 
           barcode.toLowerCase().includes(searchQuery.toLowerCase())
         );
@@ -394,6 +458,8 @@ const Menu = ({
 
   // ✅ UPDATED: Search across all items when searchQuery is present, ignore subcategory filter
   const filteredMenuItems = items.filter(item => {
+    if (!isItemVisibleForContext(item)) return false;
+
     const itemName = item.itemName || item.item_name || item.name || item.title || '';
     const barcode = item.barCode || item.barcode || '';
     const matchesSearch = !searchQuery || 
@@ -453,6 +519,7 @@ const Menu = ({
             </div>
             <input
               type="text"
+              id="pos-item-search"
               ref={searchInputRef}
               className="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm"
               placeholder="Search menu items..."

@@ -8,7 +8,9 @@ import Cart from '../components/Cart';
 import SettingsSidebar from '../components/SettingsSidebar';
 import PaymentModal from '../components/PaymentModal';
 import DayClosePopup from '../components/DayClosePopup';
-import { getSalesDate, getKotRedirectUrl, getItems } from '../services/apicall';
+import SalesDateResetPopup from '../components/SalesDateResetPopup';
+import ResendReportMailPopup from '../components/ResendReportMailPopup';
+import { getSalesDate, getKotRedirectUrl, getItems, getCompany } from '../services/apicall';
 
 export default function RestaurantBilling() {
   const navigate = useNavigate();
@@ -35,6 +37,8 @@ export default function RestaurantBilling() {
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showDayClosePopup, setShowDayClosePopup] = useState(false);
+  const [showSalesDateResetPopup, setShowSalesDateResetPopup] = useState(false);
+  const [showResendReportMailPopup, setShowResendReportMailPopup] = useState(false);
 
   const [salesDate, setSalesDate] = useState('');
   const [salesDateISO, setSalesDateISO] = useState('');
@@ -42,6 +46,7 @@ export default function RestaurantBilling() {
   const [nextOrderId, setNextOrderId] = useState('');
 
   const userName = localStorage.getItem('userName') || 'User';
+  const [companyName, setCompanyName] = useState(localStorage.getItem('restaurantName') || '');
 
   const [toast, setToast] = useState({ show: false, message: '', type: '' });
 
@@ -61,6 +66,23 @@ export default function RestaurantBilling() {
 
   const cancelDayClose = () => {
     setShowDayClosePopup(false);
+  };
+
+  const handleSalesDateReset = () => {
+    setShowSalesDateResetPopup(true);
+  };
+
+  const confirmSalesDateReset = () => {
+    setShowSalesDateResetPopup(false);
+    handleLogout();
+  };
+
+  const cancelSalesDateReset = () => {
+    setShowSalesDateResetPopup(false);
+  };
+
+  const handleResendReportMail = () => {
+    setShowResendReportMailPopup(true);
   };
 
   // ✅ Enrichment helper for RestaurantBilling
@@ -101,6 +123,24 @@ export default function RestaurantBilling() {
       return cartItems;
     }
   };
+
+  useEffect(() => {
+    const fetchCompanyData = async () => {
+      try {
+        const data = await getCompany();
+        if (data && data.length > 0) {
+          const activeCompany = data.find(c => c.isactive === true) || data[0];
+          if (activeCompany?.companyname) {
+            setCompanyName(activeCompany.companyname);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch company info:', error);
+      }
+    };
+
+    fetchCompanyData();
+  }, []);
 
   useEffect(() => {
     const fetchSalesDate = async () => {
@@ -226,11 +266,18 @@ export default function RestaurantBilling() {
             };
           });
 
-        // ✅ Enrich with master data
-        (async () => {
-          const enriched = await enrichItemsWithData(transformedItems);
-          setSelectedItems(enriched);
-        })();
+        // Show order details immediately; enrich tax/master data in background only if needed
+        setSelectedItems(transformedItems);
+
+        const hasTaxData = transformedItems.some(
+          (item) => item.TaxItems && item.TaxItems.length > 0
+        );
+        if (!hasTaxData) {
+          (async () => {
+            const enriched = await enrichItemsWithData(transformedItems);
+            setSelectedItems(enriched);
+          })();
+        }
 
         if (existingOrder && orderId && orderId !== 0) {
           const itemKeys = transformedItems.map(item =>
@@ -492,24 +539,25 @@ export default function RestaurantBilling() {
 
       {/* ✅ UPDATED FOOTER - Shows existing order ID when editing, otherwise shows next order ID */}
       <div
-        className="bg-black py-0.5 px-3 flex items-center justify-between"
+        className="bg-black text-white"
         style={{
           fontSize: '10px',
           fontFamily: 'Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
           fontWeight: 400,
-          color: '#ffffff'
         }}
       >
-        <div className="flex items-center gap-2">
+        <div className="px-3 py-0.5 flex items-center">
           <span>Bill Id: {nextBillId}</span>
-          <span>|</span>
+          <span className="mx-2">|</span>
           <span>Order Id: {existingOrderId || nextOrderId}</span>
-          <span>|</span>
+          <span className="mx-2">|</span>
           <span>User: {userName}</span>
-        </div>
-
-        <div style={{ color: 'rgba(255,255,255,0.9)' }}>
-          BillZen Technologies Pvt. Ltd. | www.billzen.in | contact@billzen.in
+          {companyName && (
+            <>
+              <span className="mx-2">|</span>
+              <span style={{ color: 'rgba(255,255,255,0.9)' }}>{companyName}</span>
+            </>
+          )}
         </div>
       </div>
 
@@ -518,6 +566,8 @@ export default function RestaurantBilling() {
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
         handleDayClose={handleDayClose}
+        handleSalesDateReset={handleSalesDateReset}
+        handleResendReportMail={handleResendReportMail}
       />
 
       <PaymentModal
@@ -552,6 +602,17 @@ export default function RestaurantBilling() {
         isOpen={showDayClosePopup}
         onConfirm={confirmDayClose}
         onCancel={cancelDayClose}
+      />
+
+      <SalesDateResetPopup
+        isOpen={showSalesDateResetPopup}
+        onConfirm={confirmSalesDateReset}
+        onCancel={cancelSalesDateReset}
+      />
+
+      <ResendReportMailPopup
+        isOpen={showResendReportMailPopup}
+        onClose={() => setShowResendReportMailPopup(false)}
       />
 
     </div>

@@ -11,6 +11,8 @@ import MultiPayModal from './Multipaymodal';
 import CategoryDiscountModal from './CategoryDiscountModal';
 import SettingsSidebar from './SettingsSidebar';
 import DayClosePopup from './DayClosePopup';
+import SalesDateResetPopup from './SalesDateResetPopup';
+import ResendReportMailPopup from './ResendReportMailPopup';
 import { PERMISSIONS } from './permissions';
 import { usePermission } from '../context/PermissionContext';
 
@@ -52,6 +54,8 @@ const PaymentModal = ({
   const [showCategoryDiscountModal, setShowCategoryDiscountModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showDayClosePopup, setShowDayClosePopup] = useState(false);
+  const [showSalesDateResetPopup, setShowSalesDateResetPopup] = useState(false);
+  const [showResendReportMailPopup, setShowResendReportMailPopup] = useState(false);
 
   // Discount state
   const [selectedDiscount, setSelectedDiscount] = useState(null);
@@ -1410,6 +1414,31 @@ const PaymentModal = ({
     setShowDayClosePopup(false);
   };
 
+  const handleSalesDateReset = () => {
+    setShowSalesDateResetPopup(true);
+  };
+
+  const handleResendReportMail = () => {
+    setShowResendReportMailPopup(true);
+  };
+
+  const confirmSalesDateReset = () => {
+    setShowSalesDateResetPopup(false);
+    // Logout logic
+    localStorage.removeItem('isLoggedIn');
+    localStorage.removeItem('user');
+    localStorage.removeItem('loginTime');
+    sessionStorage.clear();
+    showToast('Logged out successfully', 'success');
+    setTimeout(() => {
+      navigate('/login', { replace: true });
+    }, 1000);
+  };
+
+  const cancelSalesDateReset = () => {
+    setShowSalesDateResetPopup(false);
+  };
+
   return (
     <>
       {toast.show && (
@@ -1826,6 +1855,7 @@ const PaymentModal = ({
                       <span className="text-xl italic font-black text-gray-900">UPI<span className="text-orange-500">▶</span></span>
                     </button>
                     <button
+                      onClick={() => handlePaymentModeSelect({ code: 'OTHER' })}
                       className="h-16 bg-[#d1f2f2] rounded-xl flex items-center justify-center text-base font-bold text-gray-900 shadow-sm hover:bg-[#b5e6e6] transition-all"
                     >
                       Others
@@ -1894,12 +1924,25 @@ const PaymentModal = ({
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
         handleDayClose={handleDayClose}
+        handleSalesDateReset={handleSalesDateReset}
+        handleResendReportMail={handleResendReportMail}
       />
 
       <DayClosePopup
         isOpen={showDayClosePopup}
         onConfirm={confirmDayClose}
         onCancel={cancelDayClose}
+      />
+
+      <SalesDateResetPopup
+        isOpen={showSalesDateResetPopup}
+        onConfirm={confirmSalesDateReset}
+        onCancel={cancelSalesDateReset}
+      />
+
+      <ResendReportMailPopup
+        isOpen={showResendReportMailPopup}
+        onClose={() => setShowResendReportMailPopup(false)}
       />
     </>
   );

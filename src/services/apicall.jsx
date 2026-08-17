@@ -161,6 +161,17 @@ export const getItemVariants = async (itemId) => {
   }
 };
 
+// Get item modifiers / notes for cart dropdown
+export const getItemModifiers = async () => {
+  try {
+    const response = await apiClient.get("/ItemModifier?modifierId=0");
+    return response.data;
+  } catch (error) {
+    console.error("Error fetching item modifiers:", error);
+    throw error.response ? error.response.data : error;
+  }
+};
+
 // Get all tables with sections
 export const getTables = async () => {
   try {
@@ -770,6 +781,33 @@ export const closeDayAPI = async () => {
   }
 };
 
+// ✅ Resend report mail for a date range (does not close day)
+export const sendDayCloseMailAPI = async (fromDate, toDate) => {
+  try {
+    const response = await apiClient.post("/dayclosing/sendmail", {
+      fromDate,
+      toDate
+    });
+    console.log("✅ Resend Report Mail Response:", response.data);
+    return response.data;
+  } catch (error) {
+    console.error("❌ Error resending report mail:", error);
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// ✅ NEW: Reset Sales Date API
+export const resetSalesDateAPI = async () => {
+  try {
+    const response = await apiClient.post("/dayclosing/salesdate/reset");
+    console.log("✅ Sales Date Reset Response:", response.data);
+    return response.data;
+  } catch (error) {
+    console.error("❌ Error resetting sales date:", error);
+    throw error.response ? error.response.data : error;
+  }
+};
+
 
 // ✅ Get POS User Permissions (using apiClient & dynamic API_BASE)
 export const getUserPermissions = async (userId) => {
@@ -845,7 +883,22 @@ export const printReportConfig = async (fromDate, toDate) => {
   }
 };
 
-// ✅ NEW: Report Preview API
+// JSON preview data for React Day Report Print UI
+export const getReportPreviewData = async (fromDate, toDate) => {
+  try {
+    const response = await apiClient.post("/reportprintconfig/previewdata", {
+      fromDate: fromDate,
+      toDate: toDate
+    });
+    console.log("✅ Report Preview Data Response:", response.data);
+    return response.data;
+  } catch (error) {
+    console.error("❌ Error fetching report preview data:", error);
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// Legacy PDF preview (kept for compatibility)
 export const getReportPreview = async (fromDate, toDate) => {
   try {
     const response = await apiClient.post("/reportprintconfig/preview", {
@@ -934,6 +987,21 @@ export const getComplimentaryReport = async (fromDate, toDate) => {
     return response.data;
   } catch (error) {
     console.error("❌ Error fetching complimentary report:", error);
+    throw error.response ? error.response.data : error;
+  }
+};
+
+export const getDaywiseSalesReport = async (fromDate, toDate) => {
+  try {
+    const response = await apiClient.get("/reports/daywisesales", {
+      params: {
+        fromDate: fromDate,
+        toDate: toDate
+      }
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Error fetching daywise sales report:", error);
     throw error.response ? error.response.data : error;
   }
 };

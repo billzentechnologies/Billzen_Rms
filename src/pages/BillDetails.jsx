@@ -177,6 +177,7 @@ const BillDetails = () => {
         // Sum quantities and totals
         group.item_quantity += item.item_quantity;
         group.price_after_gst += item.price_after_gst;
+        group.item_gst_total = (group.item_gst_total || 0) + (item.item_gst_total || 0);
 
         // Keep track of original items to calculate discount correctly later
         group.original_items.push(item);
@@ -188,6 +189,10 @@ const BillDetails = () => {
       // The displayed rate should be the maximum rate (standard price)
       const maxRate = Math.max(...group.original_items.map(i => i.item_rate || 0));
       const maxGstRate = Math.max(...group.original_items.map(i => i.item_gst_rate || 0));
+      const totalGstAmount = group.original_items.reduce(
+        (sum, i) => sum + (i.item_gst_total || 0),
+        0
+      );
 
       // Calculate total effective discount
       // Effective Discount = Sum(ItemDiscount) + Sum((MaxRate - ItemRate) * Qty)
@@ -202,10 +207,67 @@ const BillDetails = () => {
         ...group,
         item_rate: maxRate,
         item_gst_rate: maxGstRate,
+        item_gst_total: totalGstAmount,
         item_discount: totalDiscount
       };
     });
   }, [billDetails]);
+
+  const formatItemGst = (item) => {
+    const gstAmount = parseFloat(item.item_gst_total || 0);
+    const gstRate = parseFloat(item.item_gst_rate || 0);
+
+    if (gstAmount > 0 && gstRate > 0) {
+      return `${formatCurrency(gstAmount)} (${gstRate}%)`;
+    }
+    if (gstAmount > 0) {
+      return formatCurrency(gstAmount);
+    }
+    if (gstRate > 0) {
+      return `${gstRate}%`;
+    }
+    return '-';
+  };
+
+  const getTaxBreakdownEntries = (paymentSummary) => {
+    if (!paymentSummary) return [];
+
+    const breakdown = paymentSummary.taxBreakdown || paymentSummary.tax_breakdown;
+    if (breakdown && typeof breakdown === 'object' && !Array.isArray(breakdown)) {
+      return Object.entries(breakdown).map(([key, val]) => ({
+        label: key,
+        amount: typeof val === 'object' ? (val.amount ?? 0) : (val ?? 0)
+      })).filter(entry => parseFloat(entry.amount) > 0);
+    }
+
+    if (Array.isArray(breakdown)) {
+      return breakdown.map((entry, index) => ({
+        label: entry.taxName || entry.tax_name || entry.name || `Tax ${index + 1}`,
+        amount: entry.amount ?? entry.tax_amount ?? 0
+      })).filter(entry => parseFloat(entry.amount) > 0);
+    }
+
+    const entries = [];
+    if (parseFloat(paymentSummary.cgstTotal || paymentSummary.cgst_total || 0) > 0) {
+      entries.push({
+        label: 'CGST',
+        amount: paymentSummary.cgstTotal || paymentSummary.cgst_total
+      });
+    }
+    if (parseFloat(paymentSummary.sgstTotal || paymentSummary.sgst_total || 0) > 0) {
+      entries.push({
+        label: 'SGST',
+        amount: paymentSummary.sgstTotal || paymentSummary.sgst_total
+      });
+    }
+    return entries;
+  };
+
+  const getGstTotal = (paymentSummary) =>
+    paymentSummary?.gstTotal ??
+    paymentSummary?.totalTaxAmount ??
+    paymentSummary?.total_tax_amount ??
+    0;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -486,12 +548,6 @@ const BillDetails = () => {
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs font-semibold text-gray-600 mb-1">Credit Bill</p>
-                  <p className={`font-semibold text-sm ${billDetails.billInfo?.is_credit_bill ? 'text-orange-600' : 'text-green-600'}`}>
-                    {billDetails.billInfo?.is_credit_bill ? 'Yes' : 'No'}
-                  </p>
-                </div>
-                <div>
                   <p className="text-xs font-semibold text-gray-600 mb-1">Total Items</p>
                   <p className="font-semibold text-sm text-gray-900">{billDetails.billInfo?.item_count || 0}</p>
                 </div>
@@ -527,7 +583,7 @@ const BillDetails = () => {
                               {item.item_discount > 0 ? `-${formatCurrency(item.item_discount)}` : '-'}
                             </td>
                             <td className="py-2 px-3 text-right text-gray-900 font-medium">
-                              {item.item_gst_rate > 0 ? `${item.item_gst_rate}%` : '-'}
+                              {formatItemGst(item)}
                             </td>
                             <td className="py-2 px-3 text-right font-bold text-gray-900">
                               {formatCurrency(item.price_after_gst)}
@@ -540,7 +596,9 @@ const BillDetails = () => {
 
                   {/* Mobile Cards */}
                   <div className="sm:hidden space-y-2">
-                    {groupedBillItems.map((item, i) => (
+                    {groupedBillItems.map((item, i) => {
+                      const gstLabel = formatItemGst(item);
+                      return (
                       <div key={i} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
                         <div className="flex justify-between items-start mb-2">
                           <div className="flex-1">
@@ -554,10 +612,11 @@ const BillDetails = () => {
                         </div>
                         <div className="flex justify-between text-xs text-gray-700 font-medium pt-2 border-t border-gray-200">
                           <span>Rate: {formatCurrency(item.item_rate)}</span>
-                          {item.item_gst_rate > 0 && <span>GST: {item.item_gst_rate}%</span>}
+                          {gstLabel !== '-' && <span>GST: {gstLabel}</span>}
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -581,10 +640,23 @@ const BillDetails = () => {
                       <span className="font-bold text-red-600">-{formatCurrency(billDetails.paymentSummary.operatorDiscount)}</span>
                     </div>
                   )}
+                  {getTaxBreakdownEntries(billDetails.paymentSummary).map((tax) => (
+                    <div key={tax.label} className="flex justify-between text-sm font-medium text-gray-800">
+                      <span className="uppercase">{tax.label}:</span>
+                      <span className="font-bold text-gray-900">{formatCurrency(tax.amount)}</span>
+                    </div>
+                  ))}
                   <div className="flex justify-between text-sm font-medium text-gray-800">
                     <span>GST Total:</span>
-                    <span className="font-bold text-gray-900">{formatCurrency(billDetails.paymentSummary.gstTotal)}</span>
+                    <span className="font-bold text-gray-900">{formatCurrency(getGstTotal(billDetails.paymentSummary))}</span>
                   </div>
+                  {billDetails.paymentSummary.roundOff != null &&
+                    Math.abs(parseFloat(billDetails.paymentSummary.roundOff || 0)) !== 0 && (
+                    <div className="flex justify-between text-sm font-medium text-gray-800">
+                      <span>Round Off:</span>
+                      <span className="font-bold text-gray-900">{formatCurrency(billDetails.paymentSummary.roundOff)}</span>
+                    </div>
+                  )}
                   {billDetails.paymentSummary.refund_amount > 0 && (
                     <div className="flex justify-between text-sm font-medium text-gray-800">
                       <span>Refund:</span>

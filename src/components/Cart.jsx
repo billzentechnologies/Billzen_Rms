@@ -6,7 +6,7 @@ import HoldOrdersModal from './Holdordersmodal';
 import ItemModificationModal from './Itemmodificationmodal';
 import ItemComplimentaryModal from './ItemComplimentaryModal';
 import CustomerDetailsModal from './Customerdetailsmodal';
-import { saveOrder, saveItemVoid, markComplimentary, getTransactionTypes, printCheck, getKotRedirectUrl } from "../services/apicall";
+import { saveOrder, saveItemVoid, markComplimentary, getTransactionTypes, printCheck, getKotRedirectUrl, getItemModifiers } from "../services/apicall";
 import { usePermission } from '../context/PermissionContext';
 import { PERMISSIONS } from './permissions';
 
@@ -55,6 +55,10 @@ const Cart = ({
 
   const totalQuantity = selectedItems?.reduce((sum, item) => sum + item.quantity, 0) || 0;
   const [editingItemId, setEditingItemId] = useState(null);
+
+  const [qtyEditingId, setQtyEditingId] = useState(null);
+  const [qtyEditValue, setQtyEditValue] = useState('');
+  const [itemModifiers, setItemModifiers] = useState([]);
 
   const [toast, setToast] = useState({ show: false, message: '', type: '' });
 
@@ -137,6 +141,28 @@ const Cart = ({
     fetchTransactionTypes();
   }, []);
 
+  useEffect(() => {
+    const fetchItemModifiers = async () => {
+      try {
+        const response = await getItemModifiers();
+        const list = Array.isArray(response) ? response : response?.data || [];
+        setItemModifiers(
+          list
+            .filter((m) => m && m.isactive !== false && (m.modifierName || '').trim())
+            .map((m) => ({
+              id: m.modifierId,
+              name: (m.modifierName || '').trim()
+            }))
+        );
+      } catch (error) {
+        console.error("❌ Failed to load item modifiers:", error);
+        setItemModifiers([]);
+      }
+    };
+
+    fetchItemModifiers();
+  }, []);
+
   const updateDescription = (itemId, description) => {
     setSelectedItems(prevItems =>
       prevItems.map(item =>
@@ -150,6 +176,27 @@ const Cart = ({
       cartRef.current.scrollTop = cartRef.current.scrollHeight;
     }
   }, [selectedItems]);
+
+  const startQtyEdit = (e, item) => {
+    e.stopPropagation();
+    setQtyEditingId(item.id);
+    setQtyEditValue(String(item.quantity || 1));
+  };
+
+  const cancelQtyEdit = () => {
+    setQtyEditingId(null);
+    setQtyEditValue('');
+  };
+
+  const commitQtyEdit = (itemId) => {
+    const qty = parseInt(qtyEditValue, 10);
+    if (!qtyEditValue.trim() || Number.isNaN(qty) || qty < 0) {
+      cancelQtyEdit();
+      return;
+    }
+    updateQuantity(itemId, qty);
+    cancelQtyEdit();
+  };
 
   const handleCustomerDetailsSubmit = (details) => {
     console.log('👤 Customer details saved:', details);
@@ -210,6 +257,12 @@ const Cart = ({
 
     setSelectedItems(restoredItems);
 
+    // Mark restored lines as already sent (KOT already punched)
+    const restoredKeys = restoredItems.map((item) =>
+      `${item.id}_${item.variantId || 0}_${item.description || ''}`.toLowerCase()
+    );
+    setSentItems(restoredKeys);
+
     if (orderDetails.orderId) {
       setExistingOrderId(orderDetails.orderId);
     }
@@ -267,6 +320,20 @@ const Cart = ({
     } else if (!item.isVoided && !item.isComplimentary) {
       setEditingItemId(item.id);
     }
+  };
+
+  const focusItemSearch = () => {
+    setTimeout(() => {
+      const searchInput = document.getElementById('pos-item-search');
+      if (searchInput) {
+        searchInput.focus();
+      }
+    }, 50);
+  };
+
+  const finishModifierEdit = () => {
+    setEditingItemId(null);
+    focusItemSearch();
   };
 
   const { executeWithPermission } = usePermission();
@@ -1199,7 +1266,7 @@ const Cart = ({
         </div>
       )}
 
-      <div className="w-96 h-full flex flex-col border-l bg-white">
+      <div className="w-96 h-full flex flex-col border-l bg-white" data-pos-cart="true">
         <div className="bg-gray-100 p-2 border-b">
           {loadingTransactionTypes ? (
             <div className="flex justify-center items-center h-10 text-xs text-gray-500">
@@ -1394,15 +1461,56 @@ const Cart = ({
 
 
                       {editingItemId === itemId && !isVoided && !isAlreadySent ? (
-                        <input
-                          type="text"
-                          value={itemDescription}
-                          onChange={(e) => updateDescription(itemId, e.target.value)}
-                          onBlur={() => setEditingItemId(null)}
-                          placeholder="Add notes"
-                          className="text-[10px] text-gray-700 mt-0.5 w-full border rounded px-1 py-0.5"
-                          autoFocus
-                        />
+                        <div
+                          className="mt-0.5 space-y-1"
+                          data-no-search-refocus="true"
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onBlur={(e) => {
+                            if (!e.currentTarget.contains(e.relatedTarget)) {
+                              finishModifierEdit();
+                            }
+                          }}
+                        >
+                          <input
+                            type="text"
+                            value={itemDescription}
+                            onChange={(e) => updateDescription(itemId, e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                finishModifierEdit();
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault();
+                                finishModifierEdit();
+                              }
+                            }}
+                            placeholder="Type note..."
+                            className="text-[10px] text-gray-700 w-full border rounded px-1 py-0.5 bg-white"
+                            autoFocus
+                            data-no-search-refocus="true"
+                          />
+                          <select
+                            value={
+                              itemModifiers.some((m) => m.name === itemDescription)
+                                ? itemDescription
+                                : ''
+                            }
+                            onChange={(e) => {
+                              updateDescription(itemId, e.target.value);
+                              finishModifierEdit();
+                            }}
+                            className="text-[10px] text-gray-700 w-full border rounded px-1 py-0.5 bg-white"
+                            data-no-search-refocus="true"
+                          >
+                            <option value="">Select modifier...</option>
+                            {itemModifiers.map((mod) => (
+                              <option key={mod.id} value={mod.name}>
+                                {mod.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       ) : (
                         itemDescription && (
                           <div className="text-[10px] text-gray-500 mt-0.5 truncate" title={itemDescription}>
@@ -1424,7 +1532,44 @@ const Cart = ({
                           <Minus className="w-2.5 h-2.5" />
                         </button>
                       )}
-                      <span className="text-xs w-6 text-center">{itemQuantity}</span>
+                      {!isVoided && !isAlreadySent && !isComplimentary ? (
+                        qtyEditingId === itemId ? (
+                          <input
+                            type="number"
+                            min="0"
+                            value={qtyEditValue}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => setQtyEditValue(e.target.value.replace(/[^\d]/g, '').slice(0, 4))}
+                            onBlur={() => commitQtyEdit(itemId)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                commitQtyEdit(itemId);
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault();
+                                cancelQtyEdit();
+                              }
+                            }}
+                            className="text-xs w-10 text-center border border-gray-400 rounded px-0.5 py-0.5 outline-none focus:border-gray-600"
+                            autoFocus
+                          />
+                        ) : (
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => startQtyEdit(e, item)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') startQtyEdit(e, item);
+                            }}
+                            className="text-xs w-6 text-center cursor-pointer hover:bg-gray-100 rounded"
+                            title="Click to edit quantity"
+                          >
+                            {itemQuantity}
+                          </span>
+                        )
+                      ) : (
+                        <span className="text-xs w-6 text-center">{itemQuantity}</span>
+                      )}
                       {!isVoided && (
                         <button
                           onClick={(e) => {
@@ -1582,6 +1727,7 @@ const Cart = ({
         buttonIcon="💾"
         modalTitle="Customer Details"
       />
+
     </>
   );
 };

@@ -582,10 +582,10 @@ const TablePage = () => {
               const variantId = item.variantId || item.VariantId || 0;
 
               // Find modifiers for this specific main item
-              const itemModifiers = modifiers.filter(m => Number(m.ModifierItem || m.modifierItem) === itemId);
+              const itemModifiers = modifiers.filter(m => Number(m['modifierItem'] ?? m['ModifierItem'] ?? m['modifieritem'] ?? 0) === Number(itemId));
               const modifierComments = itemModifiers.map(m => {
                 const name = m.itemname || m.itemName || '';
-                return name.replace(/^\[\[|\]\]$/g, '');
+                return String(name).replace(/^\[+|\]+$/g, '').trim();
               }).filter(Boolean);
 
               const originalDesc = (item.addDetails || item.AddDetails || '').trim();
@@ -725,10 +725,10 @@ const TablePage = () => {
           const variantId = item.variantId || item.VariantId || 0;
 
           // Find modifiers for this specific main item
-          const itemModifiers = modifiers.filter(m => Number(m.ModifierItem || m.modifierItem) === itemId);
+          const itemModifiers = modifiers.filter(m => Number(m['modifierItem'] ?? m['ModifierItem'] ?? m['modifieritem'] ?? 0) === Number(itemId));
           const modifierComments = itemModifiers.map(m => {
             const name = m.itemname || m.itemName || '';
-            return name.replace(/^\[\[|\]\]$/g, '');
+            return String(name).replace(/^\[+|\]+$/g, '').trim();
           }).filter(Boolean);
 
           const originalDesc = (item.addDetails || item.AddDetails || '').trim();
@@ -1001,9 +1001,8 @@ const TablePage = () => {
                       <div
                         key={`${table.sectionId}-${table.Id}-${table.name}`}
                         onClick={() => handleTableClick(table)}
-                        className="bg-white border-2 rounded-lg p-3 flex flex-col items-center text-center hover:shadow-lg transition cursor-pointer hover:border-blue-300"
-                      >
-                        <h3 className="text-sm font-bold mb-2">Table {displayName}</h3>
+                        className="bg-white border-2 rounded-lg p-3 flex flex-col items-center text-center hover:shadow-lg transition cursor-pointer hover:border-blue-300">
+                           <h3 className="text-sm font-bold mb-2">{displayName}</h3>
                         <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusStyle(table.status)}`}>
                           {getStatusText(table.status)}
                         </span>
@@ -1036,7 +1035,7 @@ const TablePage = () => {
               Enter Number of Guests
             </div>
             <div className="text-center text-sm text-gray-600 mb-4">
-              Table {selectedTable?.name}
+              {selectedTable?.name}
             </div>
             <PaxNumberPad
               onClose={() => setShowPaxModal(false)}
@@ -1074,7 +1073,7 @@ const TablePage = () => {
               ×
             </button>
             <div className="text-center mb-6">
-              <h2 className="text-2xl font-bold mb-2">Table {selectedTable?.name}</h2>
+              <h2 className="text-2xl font-bold mb-2"> {selectedTable?.name}</h2>
               <p className="text-sm text-gray-600">{selectedTable?.Section_name}</p>
               <p className="text-xs text-gray-500 mt-2">Select a chair to view details</p>
             </div>

@@ -37,3 +37,13 @@ export const saveLogToFile = async (logEntry) => {
     }
 };
 
+
+
+
+
+
+
+
+
+
+

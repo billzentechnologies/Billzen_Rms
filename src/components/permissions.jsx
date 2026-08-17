@@ -13,7 +13,8 @@ export const PERMISSIONS = {
   ADMIN_PAGE: 9,
   PETTY_CASH: 10,
   ITEM_COMPLIMENTARY: 11,
-  DAY_REPORT_PRINT: 12
+  DAY_REPORT_PRINT: 12,
+  RESEND_REPORT_MAIL: 13
 };
 
 // Permission names mapping
@@ -29,7 +30,8 @@ export const PERMISSION_NAMES = {
   9: 'Admin Page',
   10: 'Petty Cash',
   11: 'Item Complimentary',
-  12: 'Day Report Print'
+  12: 'Day Report Print',
+  13: 'Resend Report Mail'
 };
 
 // Global callback for permission denied (will be set by PermissionProvider)

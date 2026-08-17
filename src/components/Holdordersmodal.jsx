@@ -124,18 +124,33 @@ const HoldOrdersModal = ({ isOpen, onClose, onSelectHoldOrder }) => {
         return;
       }
 
-      // ✅ TRANSFORM ITEMS (without tax data initially)
+      // Merge modifier note lines (itemId 0) onto parent items, then group
       const groupedMap = new Map();
+      const mainItems = orderItems.filter((i) => (i.itemId || i.ItemId || 0) > 0);
+      const modifiers = orderItems.filter((i) => (i.itemId || i.ItemId || 0) === 0);
 
-      orderItems.forEach((item) => {
+      const getModifierParentId = (m) =>
+        Number(m['modifierItem'] ?? m['ModifierItem'] ?? m['modifieritem'] ?? 0);
+
+      const stripModifierBrackets = (name) =>
+        String(name || '')
+          .replace(/^\[+|\]+$/g, '')
+          .trim();
+
+      mainItems.forEach((item) => {
         const itemId = item.itemId || item.ItemId || 0;
         const variantId = item.variantId || item.VariantId || 0;
-        const description = (item.addDetails || item.AddDetails || item.description || '').trim();
-        const key = `${itemId}_${variantId}_${description}`.toLowerCase();
 
+        const itemModifiers = modifiers.filter((m) => getModifierParentId(m) === Number(itemId));
+        const modifierComments = itemModifiers
+          .map((m) => stripModifierBrackets(m.itemname || m.itemName || m.ItemName || ''))
+          .filter(Boolean);
+
+        const originalDesc = (item.addDetails || item.AddDetails || item.description || '').trim();
+        const combinedDesc = [originalDesc, ...modifierComments].filter(Boolean).join(', ');
+
+        const key = `${itemId}_${variantId}_${combinedDesc}`.toLowerCase();
         const qty = parseFloat(item.itemQty || item.ItemQty || item.quantity || 0);
-        const discount = parseFloat(item.itemDisc || item.ItemDisc || item.discount || 0);
-        const discType = item.discType || item.DiscType || 'None';
 
         if (groupedMap.has(key)) {
           const existing = groupedMap.get(key);
@@ -144,17 +159,19 @@ const HoldOrdersModal = ({ isOpen, onClose, onSelectHoldOrder }) => {
           groupedMap.set(key, {
             ...item,
             quantity: qty,
+            addDetails: combinedDesc,
+            description: combinedDesc
           });
         }
       });
 
-      // ✅ TRANSFORM ITEMS (with tax data enrichment after grouping)
       let transformedItems = Array.from(groupedMap.values())
         .filter(item => item.quantity > 0)
         .map((item, index) => {
           const itemId = item.itemId || item.ItemId || index;
           const variantId = item.variantId || item.VariantId || 0;
           const id = `${itemId}_${variantId}_${index}`;
+          const note = (item.addDetails || item.description || '').trim();
 
           return {
             id: id,
@@ -168,21 +185,20 @@ const HoldOrdersModal = ({ isOpen, onClose, onSelectHoldOrder }) => {
             itemDisc: 0,
             discount: 0,
             discType: 'None',
-            addDetails: item.addDetails || item.AddDetails || item.description || '',
-            description: item.addDetails || item.AddDetails || item.description || '',
+            addDetails: note,
+            description: note,
             variantId: variantId,
             variantName: item.variantName || item.VariantName || '',
-            modifierItem: item.ModifierItem || item.modifierItem || 0,
+            modifierItem: item['modifierItem'] || item['ModifierItem'] || 0,
             isVoided: false,
             voidReason: '',
-            // ✅ Preserve TaxItems if present in API response
             TaxItems: item.TaxItems || item.taxItems || [],
             TransactionItems: item.TransactionItems || item.transactionItems || [],
             SectionItemRates: item.SectionItemRates || item.sectionItemRates || []
           };
         });
 
-      // ✅ CRITICAL FIX: Enrich items with tax data from getItems API
+      //       // ✅ CRITICAL FIX: Enrich items with tax data from getItems API
       console.log('🔄 Enriching items with tax data...');
       transformedItems = await enrichItemsWithTaxData(transformedItems);
       console.log('✅ Items after enrichment:', transformedItems);

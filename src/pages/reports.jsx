@@ -17,6 +17,7 @@ import {
   getCompany,
   getSalesSummary,
   getCategorySectionReport,
+  getDaywiseSalesReport,
 } from '../services/apicall';
 
 const ReportButton = ({ label, tab, activeTab, setActiveTab, onClose }) => (
@@ -83,6 +84,8 @@ const Reports = () => {
   const [ncReportsAPI, setNcReportsAPI] = useState([]);
   const [itemComplimentaryReportsAPI, setItemComplimentaryReportsAPI] = useState([]);
   const [categorySectionReport, setCategorySectionReport] = useState(null);
+  const [daywiseSalesReports, setDaywiseSalesReports] = useState([]);
+  const [daywiseSalesGrandTotal, setDaywiseSalesGrandTotal] = useState(0);
   const [globalSections, setGlobalSections] = useState([]);
   const [companyInfo, setCompanyInfo] = useState(null);
   const [salesSummary, setSalesSummary] = useState(null);
@@ -244,6 +247,12 @@ const Reports = () => {
   useEffect(() => {
     if (activeTab === 'categorySectionReport' && filters.fromDate && filters.toDate) {
       fetchCategorySectionReport();
+    }
+  }, [activeTab, filters.fromDate, filters.toDate]);
+
+  useEffect(() => {
+    if (activeTab === 'daywiseSales' && filters.fromDate && filters.toDate) {
+      fetchDaywiseSalesReport();
     }
   }, [activeTab, filters.fromDate, filters.toDate]);
 
@@ -524,6 +533,29 @@ const Reports = () => {
     }
   };
 
+  const fetchDaywiseSalesReport = async () => {
+    if (!filters.fromDate || !filters.toDate) return;
+    setLoading(true);
+    try {
+      const response = await getDaywiseSalesReport(filters.fromDate, filters.toDate);
+      console.log('Daywise Sales Report API Response:', response);
+
+      if (response.success && response.data) {
+        setDaywiseSalesReports(response.data);
+        setDaywiseSalesGrandTotal(response.grandTotal ?? response.GrandTotal ?? 0);
+      } else {
+        setDaywiseSalesReports([]);
+        setDaywiseSalesGrandTotal(0);
+      }
+    } catch (error) {
+      console.error('Failed to fetch daywise sales report:', error);
+      setDaywiseSalesReports([]);
+      setDaywiseSalesGrandTotal(0);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Data processing
   const itemWiseData = {};
   reports.forEach(r =>
@@ -724,6 +756,7 @@ const Reports = () => {
       ${companyHeader}
       <h2 style="text-align: center;">${{
         itemWise: 'Item-wise Sales Report',
+        daywiseSales: 'Daywise Sales Report',
         paymentSummary: 'Payment Summary',
         billWise: 'Bill-wise Report',
         itemVoid: 'Item Void Report',
@@ -843,6 +876,7 @@ const Reports = () => {
         <h2 className="text-xl font-bold mb-6 text-white mt-12 lg:mt-0">Reports</h2>
         <div className="space-y-2">
           <ReportButton label="Item-wise Sales" tab="itemWise" activeTab={activeTab} setActiveTab={setActiveTab} onClose={() => setSidebarOpen(false)} />
+          <ReportButton label="Daywise Sales" tab="daywiseSales" activeTab={activeTab} setActiveTab={setActiveTab} onClose={() => setSidebarOpen(false)} />
           <ReportButton label="Payment Summary" tab="paymentSummary" activeTab={activeTab} setActiveTab={setActiveTab} onClose={() => setSidebarOpen(false)} />
           <ReportButton label="Bill-wise Report" tab="billWise" activeTab={activeTab} setActiveTab={setActiveTab} onClose={() => setSidebarOpen(false)} />
           <ReportButton label="Item Void Report" tab="itemVoid" activeTab={activeTab} setActiveTab={setActiveTab} onClose={() => setSidebarOpen(false)} />
@@ -1176,6 +1210,83 @@ const Reports = () => {
                   </table>
 
                   {/* Sales Summary consolidated footer moved to relevant tabs */}
+                </div>
+              )}
+            </ReportWrapper>
+          )}
+
+          {/* DAYWISE SALES */}
+          {activeTab === 'daywiseSales' && (
+            <ReportWrapper
+              title="Daywise Sales Report"
+              printRef={printRef}
+              onPrint={handlePrint}
+            >
+              {loading ? (
+                <div className="py-8 text-center text-gray-500">Loading...</div>
+              ) : (
+                <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 320px)' }}>
+                  <table className="w-full text-sm text-left border-collapse">
+                    <thead>
+                      <tr className="bg-gray-100 border-t border-b border-gray-300 text-gray-800 font-semibold sticky top-0 z-10">
+                        <th className="py-2 px-3 bg-gray-100">S.No</th>
+                        <th className="py-2 px-3 bg-gray-100">Sale Date</th>
+                        <th className="py-2 px-3 bg-gray-100 text-center">Bill Count</th>
+                        <th className="py-2 px-3 bg-gray-100 text-right">Total Sales Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {daywiseSalesReports.length > 0 ? (
+                        daywiseSalesReports.map((report, index) => {
+                          const saleDateValue = report.saleDate || report.SaleDate;
+                          const billCountValue = report.billCount ?? report.BillCount ?? 0;
+                          const salesAmountValue = report.totalSalesAmount ?? report.TotalSalesAmount ?? 0;
+
+                          return (
+                            <tr
+                              key={index}
+                              className="border-b border-gray-200 text-gray-700 hover:bg-gray-50"
+                            >
+                              <td className="py-2 px-3">{index + 1}</td>
+                              <td className="py-2 px-3">
+                                {saleDateValue ? new Date(saleDateValue).toLocaleDateString('en-IN', {
+                                  day: '2-digit',
+                                  month: '2-digit',
+                                  year: 'numeric',
+                                }) : 'N/A'}
+                              </td>
+                              <td className="py-2 px-3 text-center">{billCountValue}</td>
+                              <td className="py-2 px-3 text-right font-medium text-black">
+                                {Number(salesAmountValue).toLocaleString('en-IN', {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={4} className="py-8 text-center text-gray-500">
+                            No data found for the selected date range
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                    {daywiseSalesReports.length > 0 && (
+                      <tfoot>
+                        <tr className="bg-gray-50 font-bold border-t-2 border-gray-300">
+                          <td colSpan={3} className="py-2 px-3 text-right">Grand Total:</td>
+                          <td className="py-2 px-3 text-right text-blue-600">
+                            {Number(daywiseSalesGrandTotal || 0).toLocaleString('en-IN', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
                 </div>
               )}
             </ReportWrapper>

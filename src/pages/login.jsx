@@ -89,8 +89,8 @@ const LoginPage = () => {
       const data = await loginUser({
         username: formData.username,
         password: formData.password,
-        device_id: deviceInfo.deviceId
-        // device_id: '69B0437E-AF58-4F23-8F68-30F207AEDDBE' // Sending device id
+        // device_id: deviceInfo.deviceId
+        device_id: '69B0437E-AF58-4F23-8F68-30F207AEDDBE' // Sending device id
       });
 
       console.log("API Response:", data);
@@ -230,7 +230,7 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-white px-4">
+    <div className="relative min-h-screen flex items-center justify-center bg-white px-4">
       <div className="w-full max-w-sm">
         {/* Logo Section */}
         <div className="flex flex-col items-center text-center mb-8">
@@ -338,18 +338,24 @@ const LoginPage = () => {
               )}
             </button>
           </form>
-
-          <div className="mt-4">
-            <button
-              type="button"
-              onClick={() => setShowKeyModal(true)}
-              className="w-full py-2 px-4 text-sm font-medium text-blue-600 bg-white border border-blue-600 hover:bg-blue-50 rounded-md transition duration-200"
-            >
-              Activate Key
-            </button>
-          </div>
         </div>
       </div>
+
+      <button
+        type="button"
+        onClick={() => setShowKeyModal(true)}
+        title="Activate Key"
+        aria-label="Activate Key"
+        className="fixed bottom-4 right-4 w-10 h-10 flex items-center justify-center rounded-lg border border-gray-200 bg-white text-blue-600 shadow-md hover:bg-blue-50 hover:border-blue-300 transition duration-200"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+        </svg>
+      </button>
+
+      <p className="fixed bottom-2 left-0 right-0 text-center text-xs text-gray-500 px-4">
+        © {new Date().getFullYear()} BillZen Technologies Pvt. Ltd. All rights reserved.
+      </p>
 
       {/* Key Activation Modal */}
       {showKeyModal && (

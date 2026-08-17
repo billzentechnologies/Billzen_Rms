@@ -6,7 +6,7 @@ import { PERMISSIONS, clearPermissions } from './permissions';
 import { usePermission } from '../context/PermissionContext';
 import { getAdminPageUrl } from '../services/apicall';
 
-const SettingsSidebar = ({ isOpen, onClose, handleDayClose }) => {
+const SettingsSidebar = ({ isOpen, onClose, handleDayClose, handleSalesDateReset, handleResendReportMail }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [toast, setToast] = useState({ show: false, message: '', type: '' });
@@ -33,6 +33,20 @@ const SettingsSidebar = ({ isOpen, onClose, handleDayClose }) => {
       handleDayClose();
     } else {
       navigate('/day-close');
+    }
+  };
+
+  const handleSalesDateResetClick = () => {
+    onClose();
+    if (handleSalesDateReset) {
+      handleSalesDateReset();
+    }
+  };
+
+  const handleResendReportMailClick = () => {
+    onClose();
+    if (handleResendReportMail) {
+      handleResendReportMail();
     }
   };
 
@@ -122,9 +136,23 @@ const SettingsSidebar = ({ isOpen, onClose, handleDayClose }) => {
         permission: PERMISSIONS.ADMIN_PAGE // 🔐 Requires ADMIN_PAGE permission (ID: 9)
       },
       {
+        title: 'Resend Report Mail',
+        color: 'orange',
+        isResendReportMail: true,
+        show: true,
+        permission: PERMISSIONS.RESEND_REPORT_MAIL // 🔐 Requires RESEND_REPORT_MAIL permission (ID: 13)
+      },
+      {
         title: 'Day Print Config',
         color: 'teal',
         path: '/day-print-config',
+        show: true,
+        permission: null
+      },
+      {
+        title: 'Sales Date Reset',
+        color: 'orange',
+        isSalesDateReset: true,
         show: true,
         permission: null
       },
@@ -144,6 +172,10 @@ const SettingsSidebar = ({ isOpen, onClose, handleDayClose }) => {
         handleAdminPage();
       } else if (item.isDayClose) {
         handleDayCloseClick();
+      } else if (item.isResendReportMail) {
+        handleResendReportMailClick();
+      } else if (item.isSalesDateReset) {
+        handleSalesDateResetClick();
       } else {
         handleNavigation(item.path);
       }
